@@ -31,7 +31,21 @@ from deerflow.config.token_usage_config import TokenUsageConfig
 from deerflow.config.tool_config import ToolConfig, ToolGroupConfig
 from deerflow.config.tool_search_config import ToolSearchConfig, load_tool_search_config_from_dict
 
-load_dotenv()
+def _load_project_dotenv() -> None:
+    """Load repo-root ``.env`` so values win over a broken ``source .env`` (e.g. ``$`` in passwords)."""
+    path = Path.cwd().resolve()
+    for _ in range(8):
+        candidate = path / ".env"
+        if candidate.is_file():
+            load_dotenv(candidate, override=True)
+            return
+        if path.parent == path:
+            break
+        path = path.parent
+    load_dotenv()
+
+
+_load_project_dotenv()
 
 logger = logging.getLogger(__name__)
 

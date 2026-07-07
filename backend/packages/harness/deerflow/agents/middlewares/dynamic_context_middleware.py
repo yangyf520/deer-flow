@@ -103,6 +103,7 @@ class DynamicContextMiddleware(AgentMiddleware):
 
     def _build_full_reminder(self) -> str:
         from deerflow.agents.lead_agent.prompt import _get_memory_context
+        from deerflow.utils.database import is_business_db_configured
 
         # Memory injection is gated by injection_enabled; date is always included.
         injection_enabled = self._app_config.memory.injection_enabled if self._app_config else True
@@ -114,6 +115,15 @@ class DynamicContextMiddleware(AgentMiddleware):
             lines.append(memory_context.strip())
             lines.append("")  # blank line separating memory from date
         lines.append(f"<current_date>{current_date}</current_date>")
+        if is_business_db_configured():
+            lines.append("")
+            lines.append(
+                "<business_database>"
+                "A read-only business database is configured (DB_* env). "
+                "For metrics, counts, rankings, or trends, call db_ask (or db_schema then db_query) "
+                "before ask_clarification. Treat person or entity names as database dimensions."
+                "</business_database>"
+            )
         lines.append("</system-reminder>")
 
         return "\n".join(lines)

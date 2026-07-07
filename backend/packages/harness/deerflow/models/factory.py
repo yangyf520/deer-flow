@@ -147,7 +147,9 @@ def create_chat_model(name: str | None = None, thinking_enabled: bool = False, *
         if "stream_usage" in getattr(model_class, "model_fields", {}):
             model_settings_from_config["stream_usage"] = True
 
-    model_instance = model_class(**kwargs, **model_settings_from_config)
+    # Caller kwargs override config settings (single dict avoids duplicate keyword errors).
+    model_settings_from_config.update(kwargs)
+    model_instance = model_class(**model_settings_from_config)
 
     callbacks = build_tracing_callbacks()
     if callbacks:

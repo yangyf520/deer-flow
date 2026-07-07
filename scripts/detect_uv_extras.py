@@ -155,14 +155,23 @@ def detect_from_config(path: Path) -> list[str]:
     return sorted(extras)
 
 
+def detect_from_env() -> list[str]:
+    """Map business DB env (DB_*) to harness optional dependencies."""
+    extras: set[str] = set()
+    if os.environ.get("DB_DSN") or os.environ.get("DB_TYPE"):
+        extras.add("text2sql")
+    return sorted(extras)
+
+
 def resolve_extras() -> list[str]:
     env = os.environ.get("UV_EXTRAS", "")
     if env.strip():
         return parse_env_extras(env)
+    extras: set[str] = set(detect_from_env())
     config = find_config_file()
-    if config is None:
-        return []
-    return detect_from_config(config)
+    if config is not None:
+        extras.update(detect_from_config(config))
+    return sorted(extras)
 
 
 def format_flags(extras: list[str]) -> str:

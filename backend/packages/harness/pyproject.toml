@@ -47,6 +47,14 @@ postgres = [
     "psycopg-pool>=3.3.0",
 ]
 pymupdf = ["pymupdf4llm>=0.0.17"]
+text2sql = [
+    "vanna==2.0.2",
+    "pandas>=2.0.0",
+    "pymysql>=1.1.0",
+    "psycopg[binary]>=3.3.3",
+    "python-tds>=1.15.0",
+    "sqlalchemy-pytds>=1.0.2",
+]
 
 [build-system]
 requires = ["hatchling"]

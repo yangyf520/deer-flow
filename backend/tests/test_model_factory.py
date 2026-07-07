@@ -114,6 +114,27 @@ def test_appends_all_tracing_callbacks(monkeypatch):
     assert model.callbacks == ["smith-callback", "langfuse-callback"]
 
 
+def test_kwargs_override_config_temperature(monkeypatch):
+    """Explicit kwargs (e.g. Vanna temperature=0) must override config.yaml defaults."""
+    cfg = _make_app_config(
+        [
+            ModelConfig(
+                name="alpha",
+                display_name="alpha",
+                use="langchain_openai:ChatOpenAI",
+                model="alpha",
+                temperature=0.7,
+            )
+        ]
+    )
+    _patch_factory(monkeypatch, cfg)
+
+    FakeChatModel.captured_kwargs = {}
+    factory_module.create_chat_model(name="alpha", thinking_enabled=False, temperature=0)
+
+    assert FakeChatModel.captured_kwargs.get("temperature") == 0
+
+
 # ---------------------------------------------------------------------------
 # thinking_enabled=True
 # ---------------------------------------------------------------------------

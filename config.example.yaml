@@ -360,6 +360,7 @@ tool_groups:
   - name: file:read
   - name: file:write
   - name: bash
+  - name: data
 
 # ============================================================================
 # Tools Configuration
@@ -493,6 +494,20 @@ tools:
   - name: bash
     group: bash
     use: deerflow.sandbox.tools:bash_tool
+
+  # Business database (read-only). Configure DB_DSN or DB_TYPE + credentials in .env.
+  # Install: cd backend && uv sync --all-packages --extra text2sql  (required for db_ask)
+  - name: db_schema
+    group: data
+    use: deerflow.community.text2sql.tools:db_schema_tool
+  - name: db_query
+    group: data
+    use: deerflow.community.text2sql.tools:db_query_tool
+    max_rows: 500
+  - name: db_ask
+    group: data
+    use: deerflow.community.text2sql.tools:db_ask_tool
+    max_rows: 500
 
 # ============================================================================
 # Tool Search Configuration (Deferred Tool Loading)
