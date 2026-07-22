@@ -10,9 +10,10 @@ per-user layout.
 import logging
 import re
 from pathlib import Path
-from typing import Literal
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+import yaml
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from deerflow.config.paths import get_paths
 from deerflow.runtime.user_context import get_effective_user_id
@@ -21,7 +22,14 @@ logger = logging.getLogger(__name__)
 
 SOUL_FILENAME = "SOUL.md"
 AGENT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9-]+$")
-MAX_AGENT_OUTPUT_TOKENS = 200_000
+
+# Persisted agent fields (user-facing config).
+_AGENT_CONFIG_FIELDS = frozenset({"name", "description", "model", "knowledge_spaces", "knowledge_scenario", "tool_groups", "skills", "github"})
+
+# Skill → config tool_groups entry required at runtime (see config.yaml tool_groups).
+SKILL_TOOL_GROUPS: dict[str, str] = {
+    "policy-review": "policy_review",
+}
 
 
 def _blank_to_none(value: str | None) -> str | None:
@@ -156,44 +164,14 @@ def validate_agent_name(name: str | None) -> str | None:
     return name
 
 
-class AgentModelSettings(BaseModel):
-    """Per-agent LLM sampling overrides layered on top of the model profile.
-
-    These are provider sampling knobs (not DeerFlow runtime switches like
-    ``thinking_enabled``). They let two agents that reference the *same*
-    ``models:`` profile still run with different temperature / output length —
-    the core ask of issue #4336, where "different agents have different
-    capabilities, so a shared temperature is a poor fit".
-
-    ``extra="forbid"``: the sampling surface is an explicit allowlist so a
-    stray key never reaches the provider request body and fails at request
-    time with an opaque error. Widen it by adding a declared field (e.g.
-    ``top_p``) rather than relaxing the model config. Every field is optional;
-    ``None`` means "do not override the profile value".
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    temperature: float | None = Field(
-        default=None,
-        ge=0.0,
-        le=2.0,
-        description="Sampling temperature override (0.0-2.0). None = inherit the model profile's value.",
-    )
-    max_tokens: int | None = Field(
-        default=None,
-        ge=1,
-        le=MAX_AGENT_OUTPUT_TOKENS,
-        description=f"Max output tokens override (1-{MAX_AGENT_OUTPUT_TOKENS}). None = inherit the model profile's value.",
-    )
-
-
 class AgentConfig(BaseModel):
     """Configuration for a custom agent."""
 
     name: str
     description: str = ""
     model: str | None = None
+    knowledge_spaces: list[str] | None = None
+    knowledge_scenario: str | None = None
     tool_groups: list[str] | None = None
     # skills controls which skills are discoverable and may be activated by the
     # agent. It does not activate their allowed-tools policies at construction:
@@ -201,42 +179,64 @@ class AgentConfig(BaseModel):
     # - [] (explicit empty list): disable all skills
     # - ["skill1", "skill2"]: load only the specified skills
     skills: list[str] | None = None
-    # Per-agent LLM sampling overrides (temperature / max_tokens) layered on top
-    # of the referenced model profile. None = no overrides (issue #4336).
-    model_settings: AgentModelSettings | None = None
-    # Per-agent thinking-mode default. None = do not override the runtime
-    # default (a request-supplied thinking flag still wins over this).
-    thinking_enabled: bool | None = None
-    # Per-agent reasoning-effort default for models that support it. None = do
-    # not override (a request-supplied reasoning_effort still wins over this).
-    reasoning_effort: Literal["low", "medium", "high"] | None = None
     # Optional binding to GitHub repositories so this agent can respond to
     # webhook events from the gateway dispatcher. None means "no GitHub
     # integration", which is the case for every existing agent.
     github: GitHubAgentConfig | None = None
 
 
-# Fields explicitly managed by agent-update surfaces. Anything else declared
-# on :class:`AgentConfig` — currently ``github``, and any future field — is
-# preserved verbatim by :func:`preserve_non_managed_fields` so update surfaces
-# do not silently drop hand-authored configuration. Some surfaces expose only a
-# subset of these managed fields (for example, the harness ``update_agent``
-# tool does not accept model-behavior arguments), so they must carry their
-# unsupported managed fields forward explicitly when rewriting config.yaml.
-# ``name`` is included because updaters always re-emit it from the directory
-# name (it must never come from the request body).
-MANAGED_AGENT_CONFIG_FIELDS: frozenset[str] = frozenset(
-    {
-        "name",
-        "description",
-        "model",
-        "tool_groups",
-        "skills",
-        "model_settings",
-        "thinking_enabled",
-        "reasoning_effort",
-    }
-)
+def _normalize_agent_config_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Strip deprecated persisted keys and infer scenario from legacy skill lists."""
+    normalized = {k: v for k, v in data.items() if k in _AGENT_CONFIG_FIELDS}
+    if not normalized.get("knowledge_scenario"):
+        legacy_skills = data.get("skills")
+        if isinstance(legacy_skills, list) and len(legacy_skills) == 1 and isinstance(legacy_skills[0], str):
+            normalized["knowledge_scenario"] = legacy_skills[0]
+    return normalized
+
+
+def skills_for_agent(cfg: AgentConfig | None) -> list[str] | None:
+    """Derive skill whitelist from explicit ``skills`` or ``knowledge_scenario``."""
+    if cfg is None:
+        return None
+    if cfg.skills is not None:
+        return cfg.skills
+    if cfg.knowledge_scenario:
+        return [cfg.knowledge_scenario]
+    return None
+
+
+def merge_skill_tool_groups(
+    skills: list[str] | None,
+    tool_groups: list[str] | None = None,
+) -> list[str] | None:
+    """Ensure bound skills' tool groups are included in the agent whitelist."""
+    groups = tool_groups
+    for skill_name in skills or []:
+        required = SKILL_TOOL_GROUPS.get(skill_name)
+        if not required:
+            continue
+        if groups is None:
+            groups = [required]
+        elif required not in groups:
+            groups = [*groups, required]
+    return groups
+
+
+def tool_groups_for_agent(cfg: AgentConfig | None) -> list[str] | None:
+    """Derive runtime tool-group whitelist from agent config and bound skills."""
+    return merge_skill_tool_groups(skills_for_agent(cfg), cfg.tool_groups if cfg else None)
+
+
+# Fields explicitly managed by the agent-update surfaces (the
+# ``update_agent`` harness tool and the HTTP ``PATCH /api/agents/{name}``
+# route). Anything else declared on :class:`AgentConfig` — currently
+# ``github``, and any future field — is preserved verbatim by
+# :func:`preserve_non_managed_fields` so neither surface can silently
+# drop hand-authored configuration. ``name`` is included because the
+# updaters always re-emit it from the directory name (it must never come
+# from the request body).
+MANAGED_AGENT_CONFIG_FIELDS: frozenset[str] = frozenset({"name", "description", "model", "tool_groups", "skills", "knowledge_spaces", "knowledge_scenario"})
 
 
 def preserve_non_managed_fields(existing_cfg: AgentConfig) -> dict[str, object]:
@@ -259,20 +259,7 @@ def preserve_non_managed_fields(existing_cfg: AgentConfig) -> dict[str, object]:
 
 
 def resolve_agent_dir(name: str, *, user_id: str | None = None) -> Path:
-    """Return the on-disk directory for an agent, preferring the per-user layout.
-
-    Resolution order:
-    1. ``{base_dir}/users/{user_id}/agents/{name}/`` (per-user, current layout).
-    2. ``{base_dir}/agents/{name}/`` (legacy shared layout — read-only fallback).
-
-    If neither exists, the per-user path is returned so callers that intend to
-    create the agent write into the new layout.
-
-    Args:
-        name: Validated agent name.
-        user_id: Owner of the agent. Defaults to the effective user from the
-            request context (or ``"default"`` in no-auth mode).
-    """
+    """Return the on-disk directory for an agent, preferring the per-user layout."""
     paths = get_paths()
     effective_user = user_id or get_effective_user_id()
     user_path = paths.user_agent_dir(effective_user, name)
@@ -289,76 +276,124 @@ def resolve_agent_dir(name: str, *, user_id: str | None = None) -> Path:
 
 
 def load_agent_config(name: str | None, *, user_id: str | None = None) -> AgentConfig | None:
-    """Load the custom or default agent's config.
+    """Load agent config from DB (when enabled) or filesystem."""
 
-    Dispatches to the configured agent store (``agent_storage.backend``): the
-    ``file`` backend reads the per-user layout first and falls back to the legacy
-    shared layout; the ``db`` backend reads the shared ``agents`` table. Behaviour
-    and error semantics are unchanged from the historical file-only loader.
-
-    Args:
-        name: The agent name.
-        user_id: Owner of the agent. Defaults to the effective user from the
-            current request context.
-
-    Returns:
-        AgentConfig instance, or ``None`` if ``name`` is ``None``.
-
-    Raises:
-        FileNotFoundError: If the agent does not exist.
-        ValueError: If the stored config cannot be parsed.
-    """
     if name is None:
         return None
-    # Lazy import: the store package imports back from this module.
-    from deerflow.persistence.agents import get_agent_store
 
-    return get_agent_store().get(name, user_id=user_id)
+    name = validate_agent_name(name)
+    effective_user = user_id or get_effective_user_id()
+
+    from deerflow.persistence.agents import db_enabled, load_config_from_db
+
+    if db_enabled():
+        cfg = load_config_from_db(name, user_id=effective_user)
+        if cfg is not None:
+            return cfg
+
+    agent_dir = resolve_agent_dir(name, user_id=effective_user)
+    config_file = agent_dir / "config.yaml"
+
+    if not agent_dir.exists():
+        raise FileNotFoundError(f"Agent directory not found: {agent_dir}")
+
+    if not config_file.exists():
+        raise FileNotFoundError(f"Agent config not found: {config_file}")
+
+    try:
+        with open(config_file, encoding="utf-8") as f:
+            raw: dict[str, Any] = yaml.safe_load(f) or {}
+    except yaml.YAMLError as e:
+        raise ValueError(f"Failed to parse agent config {config_file}: {e}") from e
+
+    if "name" not in raw:
+        raw["name"] = name
+
+    data = _normalize_agent_config_data(raw)
+    return AgentConfig(**data)
 
 
 def load_agent_soul(agent_name: str | None, *, user_id: str | None = None) -> str | None:
-    """Read the SOUL.md content for an agent, if any.
+    """Read the SOUL.md file for a custom agent, if it exists."""
+    if agent_name:
+        from deerflow.persistence.agents import db_enabled, load_soul_from_db
 
-    SOUL.md defines the agent's personality, values, and behavioral guardrails.
-    It is injected into the lead agent's system prompt as additional context.
-    The default agent (``agent_name`` falsy) always reads ``{base_dir}/SOUL.md``
-    directly — it is not a custom-agent record — regardless of backend. A named
-    agent dispatches to the configured store.
+        effective_user = user_id or get_effective_user_id()
+        if db_enabled():
+            soul = load_soul_from_db(agent_name, user_id=effective_user)
+            if soul is not None:
+                return soul
 
-    Args:
-        agent_name: The name of the agent or None for the default agent.
-        user_id: Owner of the agent. Defaults to the effective user from the
-            current request context.
-
-    Returns:
-        The SOUL.md content as a string, or None if not set.
-    """
-    if not agent_name:
-        soul_path = get_paths().base_dir / SOUL_FILENAME
-        if not soul_path.exists():
-            return None
-        content = soul_path.read_text(encoding="utf-8").strip()
-        return content or None
-    from deerflow.persistence.agents import get_agent_store
-
-    return get_agent_store().get_soul(agent_name, user_id=user_id)
+        agent_dir = resolve_agent_dir(agent_name, user_id=user_id)
+        soul_path = agent_dir / SOUL_FILENAME
+        # Fallback: resolve_agent_dir requires config.yaml to be present
+        # (see #3390), but SOUL.md loading does not depend on config.yaml.
+        # If the resolved dir doesn't have config.yaml (meaning the resolver
+        # returned its default path because no agent dir qualified) and also
+        # lacks SOUL.md, check the per-user and legacy directories directly
+        # so that agents configured via DEER_FLOW_CONFIG_PATH (or any setup
+        # where the agent dir has SOUL.md but no config.yaml) can still load
+        # their soul (#4135). The config.yaml guard ensures this fallback
+        # only fires for dirs the resolver couldn't resolve, not for a
+        # properly-resolved per-user agent that simply lacks SOUL.md -
+        # preserving the "per-user entries fully shadow legacy entries"
+        # invariant (agents_config.py:3-7, list_custom_agents).
+        if not soul_path.exists() and not (agent_dir / "config.yaml").exists():
+            paths = get_paths()
+            effective_user = user_id or get_effective_user_id()
+            for candidate in (
+                paths.user_agent_dir(effective_user, agent_name),
+                paths.agent_dir(agent_name),
+            ):
+                if (candidate / SOUL_FILENAME).exists():
+                    soul_path = candidate / SOUL_FILENAME
+                    break
+    else:
+        agent_dir = get_paths().base_dir
+        soul_path = agent_dir / SOUL_FILENAME
+    if not soul_path.exists():
+        return None
+    content = soul_path.read_text(encoding="utf-8").strip()
+    return content or None
 
 
 def list_custom_agents(*, user_id: str | None = None) -> list[AgentConfig]:
-    """Return all valid custom agents for ``user_id``.
+    """List custom agents from DB and/or filesystem (DB entries win on name clash)."""
+    effective_user = user_id or get_effective_user_id()
 
-    Dispatches to the configured agent store. The ``file`` backend returns the
-    union of the per-user layout and the legacy shared layout (per-user entries
-    shadow legacy entries with the same name); the ``db`` backend returns the
-    user's rows. Sorted by name.
+    from deerflow.persistence.agents import db_enabled, list_configs_from_db
 
-    Args:
-        user_id: Owner whose agents to list. Defaults to the effective user
-            from the current request context.
+    db_agents: list[AgentConfig] = []
+    if db_enabled():
+        db_list = list_configs_from_db(user_id=effective_user)
+        if db_list is not None:
+            db_agents = db_list
 
-    Returns:
-        List of AgentConfig for each valid agent found.
-    """
-    from deerflow.persistence.agents import get_agent_store
+    paths = get_paths()
+    seen = {agent.name for agent in db_agents}
+    agents = list(db_agents)
 
-    return get_agent_store().list(user_id=user_id)
+    for root in (paths.user_agents_dir(effective_user), paths.agents_dir):
+        if not root.exists():
+            continue
+        for entry in sorted(root.iterdir()):
+            if not entry.is_dir():
+                continue
+            if entry.name in seen:
+                continue
+            config_file = entry / "config.yaml"
+            if not config_file.exists():
+                logger.debug(f"Skipping {entry.name}: no config.yaml")
+                continue
+
+            try:
+                agent_cfg = load_agent_config(entry.name, user_id=effective_user)
+                if agent_cfg is None:
+                    continue
+                agents.append(agent_cfg)
+                seen.add(entry.name)
+            except Exception as e:
+                logger.warning(f"Skipping agent '{entry.name}': {e}")
+
+    agents.sort(key=lambda a: a.name)
+    return agents

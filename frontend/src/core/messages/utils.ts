@@ -591,6 +591,28 @@ export function findToolCallResult(toolCallId: string, messages: Message[]) {
   return undefined;
 }
 
+export function findToolCallMessage(
+  toolCallId: string,
+  messages: Message[],
+): Message | undefined {
+  for (const message of messages) {
+    if (message.type === "tool" && message.tool_call_id === toolCallId) {
+      return message;
+    }
+  }
+  return undefined;
+}
+
+export function extractToolMessageArtifact(
+  message: Message,
+): Record<string, unknown> | undefined {
+  const artifact = Reflect.get(message, "artifact");
+  if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+    return undefined;
+  }
+  return artifact as Record<string, unknown>;
+}
+
 export function isHiddenFromUIMessage(message: Message) {
   if (message.additional_kwargs?.hide_from_ui === true) {
     return true;

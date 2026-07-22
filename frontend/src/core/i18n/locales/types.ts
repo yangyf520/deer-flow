@@ -11,14 +11,12 @@ export interface Translations {
     home: string;
     settings: string;
     delete: string;
+    deleteConfirm: string;
     edit: string;
     rename: string;
-    renameFailed: string;
     share: string;
     openInNewWindow: string;
     close: string;
-    back: string;
-    confirmTitle: string;
     more: string;
     search: string;
     loadMore: string;
@@ -43,28 +41,12 @@ export interface Translations {
     exportAsMarkdown: string;
     exportAsJSON: string;
     exportSuccess: string;
+    back: string;
+    clear: string;
+    refresh: string;
     regenerate: string;
     branch: string;
     showArtifacts: string;
-    browser: string;
-    showBrowser: string;
-    resourceMeta: {
-      title: string;
-      createdBy: string;
-      createdAt: string;
-    };
-  };
-
-  runDuration: {
-    reasoning: string;
-    working: string;
-    completedIn: (duration: string) => string;
-    description: string;
-    lessThanSecond: string;
-    hours: (value: number) => string;
-    minutes: (value: number) => string;
-    seconds: (value: number) => string;
-    separator: string;
   };
 
   home: {
@@ -113,14 +95,12 @@ export interface Translations {
     largeUnavailable: string;
     sensitiveUnavailable: string;
     truncatedUnavailable: string;
-    symlinkUnavailable: string;
     truncatedSummary: string;
   };
 
   // Input Box
   inputBox: {
     placeholder: string;
-    disclaimer: string;
     createSkillPrompt: string;
     addAttachments: string;
     inputPolish: string;
@@ -178,8 +158,6 @@ export interface Translations {
     goalNone: string;
     goalActive: string;
     goalFailed: string;
-    goalTooLong: string;
-    goalLengthCounter: string;
     compactSuccess: string;
     compactSkipped: string;
     compactFailed: string;
@@ -208,7 +186,9 @@ export interface Translations {
     chats: string;
     demoChats: string;
     agents: string;
+    knowledge: string;
     scheduledTasks: string;
+    apiKeys: string;
     agentsDisabledTooltip: string;
     channels: string;
   };
@@ -336,20 +316,25 @@ export interface Translations {
     title: string;
     description: string;
     newAgent: string;
+    searchPlaceholder: string;
+    searchEmpty: string;
     emptyTitle: string;
     emptyDescription: string;
     featureDisabledTitle: string;
     featureDisabledDescription: string;
     chat: string;
     delete: string;
-    deleteConfirm: string;
     deleteSuccess: string;
     newChat: string;
     createPageTitle: string;
     createPageSubtitle: string;
+    editPageTitle: string;
+    editPageSubtitle: string;
+    notFound: string;
     nameStepTitle: string;
     nameStepHint: string;
     nameStepPlaceholder: string;
+    settingsNamePlaceholder: string;
     nameStepContinue: string;
     nameStepInvalidError: string;
     nameStepAlreadyExistsError: string;
@@ -369,28 +354,189 @@ export interface Translations {
     startChatting: string;
     backToGallery: string;
     settings: string;
-    settingsTitle: string;
-    settingsDescription: string;
-    settingsModel: string;
-    settingsModelDefault: string;
-    settingsTemperature: string;
-    settingsTemperatureHint: string;
-    settingsMaxTokens: string;
-    settingsMaxTokensPlaceholder: string;
-    settingsThinking: string;
-    settingsThinkingOn: string;
-    settingsThinkingOff: string;
-    settingsReasoningEffort: string;
-    settingsInherit: string;
     settingsSaved: string;
-    settingsInvalidTemperature: string;
-    settingsInvalidMaxTokens: string;
+    saveSettings: string;
+    fieldName: string;
+    fieldDescription: string;
+    descriptionPlaceholder: string;
+    soulTitle: string;
+    soulHint: string;
+    soulGenerate: string;
+    soulGenerating: string;
+    soulGenerateError: string;
+    soulGenerated: string;
+    knowledgeTitle: string;
+    knowledgeBoundCount: string;
+    knowledgeHint: string;
+    knowledgeEmptyHint: string;
+    openKnowledge: string;
+    mountAllOpen: string;
+    unmountAllOpen: string;
+    createAgent: string;
+    createSuccess: string;
+    fieldModel: string;
+    fieldKnowledgeScenario: string;
+    knowledgeScenarioHint: string;
+    knowledgeScenarioEmpty: string;
+    modelInherit: string;
+    scenarioInherit: string;
+  };
+
+  // Knowledge
+  knowledge: {
+    title: string;
+    description: string;
+    createSpace: string;
+    mySpaces: string;
+    spaceCount: string;
+    emptySpaces: string;
+    searchPlaceholder: string;
+    searchEmpty: string;
+    unbound: string;
+    spaceUpdated: string;
+    editSpace: string;
+    fieldName: string;
+    fieldDescription: string;
+    fieldAccess: string;
+    fieldScenario: string;
+    fieldAllowedKinds: string;
+    allAllowedKinds: string;
+    selectAllowedKinds: string;
+    fieldKind: string;
+    fieldKindHint: string;
+    editTags: string;
+    uploadTagsHint: string;
+    filterAllKinds: string;
+    selectKind: string;
+    namePlaceholder: string;
+    descriptionPlaceholder: string;
+    selectScenario: string;
+    bindScenario: string;
+    documents: string;
+    eval: string;
+    grants: string;
+    agentSpacesUnbound: string;
+    grantsUpstreamHint: string;
+    deleteGrantTooltip: string;
+    docsSubtitle: string;
+    docsList: string;
+    docsCount: string;
+    docsCountFiltered: string;
+    searchFilename: string;
+    upload: string;
+    uploading: string;
+    emptyDocs: string;
+    noMatchingDocs: string;
+    viewChunks: string;
+    reindex: string;
+    reindexing: string;
+    reindexTooltip: string;
+    deleteTooltip: string;
+    deleting: string;
+    dedupedNotice: string;
+    chunks: string;
+    chunksSummary: string;
+    chunksLoading: string;
+    chunksEmpty: string;
+    searchChunks: string;
+    searchChunksEmpty: string;
+    charCount: string;
+    emptyText: string;
+    access: {
+      open: string;
+      members: string;
+      private: string;
+    };
+    accessHint: {
+      open: string;
+      members: string;
+      private: string;
+    };
+    role: {
+      viewer: string;
+      editor: string;
+      publisher: string;
+      admin: string;
+    };
+    status: {
+      ready: string;
+      processing: string;
+      failed: string;
+    };
+    phase: {
+      queued: string;
+      parsing: string;
+      embedding: string;
+      ready: string;
+      failed: string;
+    };
+    parseQuality: {
+      ok: string;
+      degraded: string;
+      failed: string;
+    };
+    parseQualityHint: {
+      ok: string;
+      degraded: string;
+      failed: string;
+    };
+    evalTitle: string;
+    evalDescription: string;
+    questionPlaceholder: string;
+    deleteQuestion: string;
+    addQuestion: string;
+    topKPrefix: string;
+    topKSuffix: string;
+    runEval: string;
+    runningEval: string;
+    needQuestion: string;
+    lowScore: string;
+    source: string;
+    section: string;
+    matchedContent: string;
+    collapseFull: string;
+    expandFull: string;
+    citable: string;
+    unknownSource: string;
+    emptySnippet: string;
+    noHits: string;
+    hitsSummary: string;
+    docsInvolved: string;
+    scoreGap: string;
+    emptyRecallHint: string;
+    collapseHidden: string;
+    expandHidden: string;
+    questionsCount: string;
+    totalLatency: string;
+    avgLatency: string;
+    hitChunks: string;
+    docsTouched: string;
+    emptyRecallCount: string;
+    lowTopCount: string;
+    grantsTitle: string;
+    grantsSpace: string;
+    addGrant: string;
+    subjectType: string;
+    roleLabel: string;
+    user: string;
+    dept: string;
+    userPlaceholder: string;
+    deptPlaceholder: string;
+    upsertGrant: string;
+    currentGrants: string;
+    emptyGrants: string;
+    kinds: Record<string, string>;
+    scenarios: Record<string, string>;
+    tagGroups: Record<string, string>;
   };
 
   // Breadcrumb
   breadcrumb: {
     workspace: string;
     chats: string;
+    agents: string;
+    knowledge: string;
+    apiKeys: string;
   };
 
   // Workspace
@@ -413,30 +559,14 @@ export interface Translations {
     startConversation: string;
     branchCreated: string;
     branchFailed: string;
-    streamReplayGap: string;
   };
 
   // Chats
   chats: {
     searchChats: string;
-    listTitle: string;
-    pageTitle: string;
-    pageDescription: string;
-    countTotal: (count: number) => string;
-    countFiltered: (shown: number, total: number) => string;
-    searchEmpty: string;
-    emptyList: string;
     loadMoreToSearch: string;
     loadingMore: string;
     loadOlderChats: string;
-    pinChat: string;
-    unpinChat: string;
-    pinChatFailed: string;
-    mainChat: string;
-    pinnedBadge: string;
-    messageCount: (count: number) => string;
-    deleteConfirm: string;
-    deleteFailed: string;
   };
 
   // Sidecar
@@ -516,15 +646,8 @@ export interface Translations {
     clickToViewContent: string;
     writeTodos: string;
     skillInstallTooltip: string;
-    browserNavigate: (url: string) => string;
-    browserNavigateGeneric: string;
-    browserClick: string;
-    browserType: string;
-    browserSnapshot: string;
-    browserGetText: string;
-    browserBack: string;
-    browserScreenshot: string;
-    browserClose: string;
+    structuredResult: (schemaHint: string) => string;
+    viewStructuredResult: string;
   };
 
   humanInput: {
@@ -535,9 +658,6 @@ export interface Translations {
     otherPlaceholder: string;
     submit: string;
     emptyError: string;
-    requiredError: string;
-    requiredA11yLabel: string;
-    selectPlaceholder: string;
     answeredValue: (value: string) => string;
   };
 
@@ -609,6 +729,25 @@ export interface Translations {
     toggleSidebar: string;
   };
 
+  // Auth
+  auth: {
+    login: {
+      subtitleSignIn: string;
+      subtitleSignUp: string;
+      email: string;
+      emailPlaceholder: string;
+      password: string;
+      rememberPassword: string;
+      pleaseWait: string;
+      signIn: string;
+      createAccount: string;
+      switchToSignUp: string;
+      switchToSignIn: string;
+      networkError: string;
+      backHome: string;
+    };
+  };
+
   // Settings
   settings: {
     title: string;
@@ -617,7 +756,6 @@ export interface Translations {
       account: string;
       appearance: string;
       channels: string;
-      integrations: string;
       memory: string;
       tools: string;
       skills: string;
@@ -720,105 +858,6 @@ export interface Translations {
       description: string;
       disabled: string;
     };
-    integrations: {
-      title: string;
-      description: string;
-      refresh: string;
-      install: string;
-      reinstall: string;
-      installing: string;
-      ready: string;
-      pending: string;
-      available: string;
-      unavailable: string;
-      connected: string;
-      loadFailed: string;
-      adminRequired: string;
-      lark: {
-        title: string;
-        description: string;
-        skillPack: string;
-        gatewayCli: string;
-        auth: string;
-        sandboxRuntime: string;
-        sandboxRuntimeInitContainer: string;
-        sandboxRuntimeGatewayDownload: string;
-        sandboxRuntimeNotReady: string;
-        notInstalled: string;
-        skillsInstalled: (installed: number, expected: number) => string;
-        installedVersion: (version: string) => string;
-        updateAvailable: (version: string) => string;
-        runtimeVersionMismatch: string;
-        authNotConfigured: string;
-        authConfigured: string;
-        authConfiguredFor: (user: string) => string;
-        connect: string;
-        authStarting: string;
-        checkingConnection: string;
-        connectedAction: string;
-        requestPermissions: string;
-        alreadyConnected: string;
-        connectionStarted: string;
-        connectionReady: string;
-        authStarted: string;
-        authorizationStillPending: string;
-        permissionTitle: string;
-        permissionDescription: string;
-        authDomains: Record<
-          | "approval"
-          | "apps"
-          | "attendance"
-          | "base"
-          | "calendar"
-          | "contact"
-          | "docs"
-          | "drive"
-          | "event"
-          | "im"
-          | "mail"
-          | "markdown"
-          | "mindnotes"
-          | "minutes"
-          | "note"
-          | "okr"
-          | "sheets"
-          | "slides"
-          | "task"
-          | "vc"
-          | "wiki"
-          | "all",
-          { label: string; description: string }
-        >;
-        customScopeLabel: string;
-        customScopePlaceholder: string;
-        customScopeDescription: string;
-        openConnectionLinkTitle: string;
-        openConnectionLinkDescription: string;
-        openAuthLinkTitle: string;
-        openAuthLinkDescription: string;
-        waitingAuthTitle: string;
-        waitingAuthDescription: string;
-        openAuthLink: string;
-        copyAuthLink: string;
-        completeAuth: string;
-        continueAuth: string;
-        preparingAuthorization: string;
-        completingAuth: string;
-        authExpiresIn: (seconds: number) => string;
-        installingTitle: string;
-        installingDescription: string;
-        installNextTitle: string;
-        installNextDescription: string;
-        cliNextTitle: string;
-        cliNextDescription: string;
-        configuredTitle: string;
-        configuredDescription: string;
-        connectedTitle: string;
-        connectedDescription: string;
-        authNextTitle: string;
-        authNextDescription: string;
-      };
-    };
     skills: {
       title: string;
       description: string;
@@ -860,6 +899,44 @@ export interface Translations {
       updatePassword: string;
       signOut: string;
     };
+    apiKeys: {
+      title: string;
+      description: string;
+      fieldName: string;
+      fieldAgent: string;
+      fieldDescription: string;
+      namePlaceholder: string;
+      descriptionPlaceholder: string;
+      agentPlaceholder: string;
+      noAgentBinding: string;
+      unboundAgent: string;
+      leadAgent: string;
+      createButton: string;
+      creating: string;
+      createdTitle: string;
+      createdHint: string;
+      copyButton: string;
+      myKeys: string;
+      keyCount: string;
+      searchPlaceholder: string;
+      searchEmpty: string;
+      empty: string;
+      revokeButton: string;
+      editButton: string;
+      editTitle: string;
+      saveButton: string;
+      updating: string;
+      updateSuccess: string;
+      updateError: string;
+      deleteTitle: string;
+      deleteDescription: string;
+      revoking: string;
+      revokeSuccess: string;
+      loadError: string;
+      createError: string;
+      revokeError: string;
+      networkError: string;
+    };
     acknowledge: {
       emptyTitle: string;
       emptyDescription: string;
@@ -889,9 +966,6 @@ export interface Translations {
     haveAccountSignIn: string;
     backToHome: string;
     networkError: string;
-    serviceUnavailableTitle: string;
-    serviceUnavailableDescription: string;
-    retry: string;
     authFailed: string;
     errors: {
       sso_failed: string;
