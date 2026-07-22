@@ -1003,6 +1003,25 @@ async def start_run(
             )
 
     owner_user_id = get_trusted_internal_owner_user_id(request)
+
+    bound_agent = getattr(request.state, "api_key_agent_name", None)
+    if bound_agent is not None:
+
+        def _normalize_assistant_id(value: str | None) -> str:
+            if not value:
+                return "lead_agent"
+            return value.strip().lower().replace("_", "-")
+
+        requested = _normalize_assistant_id(body.assistant_id)
+        expected = _normalize_assistant_id(bound_agent)
+        if requested != expected:
+            raise HTTPException(
+                status_code=403,
+                detail=f"This API key is bound to agent '{bound_agent}'",
+            )
+        if body.assistant_id is None and expected != "lead_agent":
+            body.assistant_id = bound_agent
+
     # Stateless run endpoints carry thread_id in the request *body*, so the
     # @require_permission(owner_check=True) decorator -- which resolves ownership
     # from the path param -- cannot protect them. Enforce thread ownership here,

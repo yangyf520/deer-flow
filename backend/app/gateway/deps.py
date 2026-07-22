@@ -252,6 +252,7 @@ async def _flush_recovered_stream_cleanups(
 
 
 if TYPE_CHECKING:
+    from app.gateway.auth.api_keys import ApiKeyRepository
     from app.gateway.auth.local_provider import LocalAuthProvider
     from app.gateway.auth.repositories.sqlite import SQLiteUserRepository
     from deerflow.persistence.thread_meta.base import ThreadMetaStore
@@ -605,6 +606,7 @@ def get_run_context(request: Request) -> RunContext:
 # Cached singletons to avoid repeated instantiation per request
 _cached_local_provider: LocalAuthProvider | None = None
 _cached_repo: SQLiteUserRepository | None = None
+_cached_api_key_repo: ApiKeyRepository | None = None
 
 
 def get_local_provider() -> LocalAuthProvider:
@@ -629,6 +631,20 @@ def get_local_provider() -> LocalAuthProvider:
     return _cached_local_provider
 
 
+def get_api_key_repository():
+    """Get or create the cached ApiKeyRepository singleton."""
+    global _cached_api_key_repo
+    if _cached_api_key_repo is None:
+        from app.gateway.auth.api_keys import ApiKeyRepository
+        from deerflow.persistence.engine import get_session_factory
+
+        sf = get_session_factory()
+        if sf is None:
+            raise RuntimeError("get_api_key_repository() called before init_engine_from_config()")
+        _cached_api_key_repo = ApiKeyRepository(sf)
+    return _cached_api_key_repo
+
+
 async def get_current_user_from_request(request: Request):
     """Get the current authenticated user from the request cookie.
 
@@ -636,10 +652,11 @@ async def get_current_user_from_request(request: Request):
     """
     state = getattr(request, "state", None)
     state_user = getattr(state, "user", None)
-    from app.gateway.auth_disabled import AUTH_SOURCE_AUTH_DISABLED, AUTH_SOURCE_INTERNAL, AUTH_SOURCE_SESSION
+    from app.gateway.auth_disabled import AUTH_SOURCE_API_KEY, AUTH_SOURCE_AUTH_DISABLED, AUTH_SOURCE_INTERNAL, AUTH_SOURCE_SESSION
 
     if state_user is not None and getattr(state, "auth_source", None) in {
         AUTH_SOURCE_SESSION,
+        AUTH_SOURCE_API_KEY,
         AUTH_SOURCE_AUTH_DISABLED,
         AUTH_SOURCE_INTERNAL,
     }:

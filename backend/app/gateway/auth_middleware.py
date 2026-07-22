@@ -18,13 +18,14 @@ from starlette.types import ASGIApp
 
 from app.gateway.auth.errors import AuthErrorCode, AuthErrorResponse
 from app.gateway.auth_disabled import (
+    AUTH_SOURCE_API_KEY,
     AUTH_SOURCE_AUTH_DISABLED,
     AUTH_SOURCE_INTERNAL,
     AUTH_SOURCE_SESSION,
     get_auth_disabled_user,
     is_auth_disabled,
 )
-from app.gateway.authz import AuthContext, resolve_route_permissions
+from app.gateway.authz import _ALL_PERMISSIONS, AuthContext
 from app.gateway.internal_auth import INTERNAL_AUTH_HEADER_NAME, get_internal_user, is_valid_internal_auth_token
 from deerflow.runtime.user_context import reset_current_user, set_current_user
 
@@ -103,38 +104,65 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 owner_user_id = owner_user_id.strip()
             internal_user = get_internal_user(owner_user_id=owner_user_id or None)
 
-        auth_source = AUTH_SOURCE_SESSION
+        user = None
+        auth_source: str | None = None
+        api_key_agent_name: str | None = None
         access_token = request.cookies.get("access_token")
 
-        # Non-public path: require session cookie
         if internal_user is not None:
             user = internal_user
             auth_source = AUTH_SOURCE_INTERNAL
-        elif access_token:
-            # Strict JWT validation: reject junk/expired tokens with 401
-            # right here instead of silently passing through. This closes
-            # the "junk cookie bypass" gap (AUTH_TEST_PLAN test 7.5.8):
-            # without this, non-isolation routes like /api/models would
-            # accept any cookie-shaped string as authentication.
-            #
-            # We call the *strict* resolver so that fine-grained error
-            # codes (token_expired, token_invalid, user_not_found, …)
-            # propagate from AuthErrorCode, not get flattened into one
-            # generic code. BaseHTTPMiddleware doesn't let HTTPException
-            # bubble up, so we catch and render it as JSONResponse here.
+        else:
+            bearer = request.headers.get("authorization", "")
+            if bearer.lower().startswith("bearer "):
+                token = bearer[7:].strip()
+                from app.gateway.auth.api_keys import API_KEY_PREFIX, authenticate_api_key
+
+                if token.startswith(API_KEY_PREFIX):
+                    from app.gateway.deps import get_api_key_repository, get_local_provider
+
+                    auth_result = await authenticate_api_key(get_api_key_repository(), token)
+                    if auth_result is None:
+                        return JSONResponse(
+                            status_code=401,
+                            content={
+                                "detail": AuthErrorResponse(
+                                    code=AuthErrorCode.NOT_AUTHENTICATED,
+                                    message="Invalid API key",
+                                ).model_dump()
+                            },
+                        )
+                    provider = get_local_provider()
+                    resolved_user = await provider.get_user(auth_result.user_id)
+                    if resolved_user is None:
+                        return JSONResponse(
+                            status_code=401,
+                            content={
+                                "detail": AuthErrorResponse(
+                                    code=AuthErrorCode.USER_NOT_FOUND,
+                                    message="User not found",
+                                ).model_dump()
+                            },
+                        )
+                    user = resolved_user
+                    auth_source = AUTH_SOURCE_API_KEY
+                    api_key_agent_name = auth_result.agent_name
+
+        if user is None and access_token:
             from app.gateway.deps import get_current_user_from_request
 
             try:
                 user = await get_current_user_from_request(request)
+                auth_source = AUTH_SOURCE_SESSION
             except HTTPException as exc:
                 if not is_auth_disabled():
                     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
                 user = get_auth_disabled_user()
                 auth_source = AUTH_SOURCE_AUTH_DISABLED
-        elif is_auth_disabled():
+        elif user is None and is_auth_disabled():
             user = get_auth_disabled_user()
             auth_source = AUTH_SOURCE_AUTH_DISABLED
-        else:
+        elif user is None:
             return JSONResponse(
                 status_code=401,
                 content={
@@ -151,11 +179,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # JWT-decode + DB-lookup pipeline a second time per request).
         request.state.user = user
         request.state.auth_source = auth_source
-        permissions = await resolve_route_permissions(
-            user,
-            is_internal=auth_source == AUTH_SOURCE_INTERNAL,
-        )
-        request.state.auth = AuthContext(user=user, permissions=permissions)
+        request.state.api_key_agent_name = api_key_agent_name
+        request.state.auth = AuthContext(user=user, permissions=_ALL_PERMISSIONS)
         token = set_current_user(user)
         try:
             return await call_next(request)
