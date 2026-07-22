@@ -4,19 +4,17 @@
 # Stage 3 (runtime): clean image without compiler toolchain for production
 
 # UV source image (override for restricted networks that cannot reach ghcr.io)
-ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.7.20
+ARG UV_IMAGE=harbor.sensetime.com/infra/astral-sh/uv:0.7.20
 FROM ${UV_IMAGE} AS uv-source
 
 # ── Stage 1: Builder ──────────────────────────────────────────────────────────
-FROM python:3.12-slim-bookworm AS builder
+FROM harbor.sensetime.com/infra/python:3.12-slim-bookworm AS builder
 
 ARG NODE_MAJOR=22
 ARG APT_MIRROR
 ARG UV_INDEX_URL
-ARG NPM_REGISTRY
-ARG LARK_CLI_NPM_VERSION=1.0.65
-# Optional extras to install (e.g. "postgres" for PostgreSQL support)
-# Usage: docker build --build-arg UV_EXTRAS=postgres,discord ...
+# Optional extras (comma- or space-separated). Example:
+#   docker build --build-arg UV_EXTRAS=postgres,knowledge,redis ...
 ARG UV_EXTRAS
 
 # Optionally override apt mirror for restricted networks (e.g. APT_MIRROR=mirrors.aliyun.com)
@@ -38,11 +36,6 @@ RUN apt-get update && apt-get install -y \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install the official Lark/Feishu CLI used by the managed Lark integration.
-RUN if [ -n "${NPM_REGISTRY}" ]; then npm config set registry "${NPM_REGISTRY}"; fi \
-    && npm install -g @larksuite/cli@${LARK_CLI_NPM_VERSION} \
-    && lark-cli --version
-
 # Install uv (source image overridable via UV_IMAGE build arg)
 COPY --from=uv-source /uv /uvx /usr/local/bin/
 
@@ -51,12 +44,19 @@ WORKDIR /app
 
 # Copy backend source code
 COPY backend ./backend
+# Bake config at project root (not under backend/) so bind-mounting ./backend
+# cannot hide it. Prefer local config.yaml when present; else use example so
+# the image boots (config.yaml is gitignored and often absent in CI builds).
+COPY config.example.yaml ./config.yaml
+RUN --mount=type=bind,source=.,target=/context,ro \
+    if [ -f /context/config.yaml ]; then cp /context/config.yaml ./config.yaml; fi
+RUN cp ./config.yaml ./backend/config.yaml
 
-# Install dependencies with cache mount
+# Install dependencies with cache mount.
 # `redis` is always installed because Docker Compose defaults the stream bridge
 # to Redis (DEER_FLOW_STREAM_BRIDGE_REDIS_URL); it is an optional extra elsewhere
 # so slim non-Docker installs do not pull it.
-# When UV_EXTRAS is set (comma- or whitespace-separated), installs optional dependencies.
+# Split UV_EXTRAS on comma/space into repeated --extra flags (uv rejects "a,b").
 RUN --mount=type=cache,target=/root/.cache/uv \
     sh -c 'cd backend && \
     set -f; \
@@ -77,6 +77,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 ENV PYTHONIOENCODING=utf-8
+ENV DEER_FLOW_PROJECT_ROOT=/app
+ENV DEER_FLOW_CONFIG_PATH=/app/config.yaml
 
 # ── Stage 2: Dev ──────────────────────────────────────────────────────────────
 # Retains compiler toolchain from builder so startup-time `uv sync` can build
@@ -84,7 +86,7 @@ ENV PYTHONIOENCODING=utf-8
 FROM builder AS dev
 
 # Install Docker CLI (for DooD: allows starting sandbox containers via host Docker socket)
-COPY --from=docker:cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=harbor.sensetime.com/infra/docker:cli /usr/local/bin/docker /usr/local/bin/docker
 
 EXPOSE 8001
 
@@ -92,23 +94,22 @@ CMD ["sh", "-c", "cd backend && PYTHONPATH=. uv run uvicorn app.gateway.app:app 
 
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
 # Clean image without build-essential — reduces size (~200 MB) and attack surface.
-FROM python:3.12-slim-bookworm
+FROM harbor.sensetime.com/infra/python:3.12-slim-bookworm
 
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 ENV PYTHONIOENCODING=utf-8
+ENV DEER_FLOW_PROJECT_ROOT=/app
+ENV DEER_FLOW_CONFIG_PATH=/app/config.yaml
 
 # Copy Node.js runtime from builder (provides npx for MCP servers)
 COPY --from=builder /usr/bin/node /usr/bin/node
 COPY --from=builder /usr/lib/node_modules /usr/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/bin/npm \
-    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/bin/npx \
-    && LARK_CLI_BIN="$(node -p 'const bin=require("/usr/lib/node_modules/@larksuite/cli/package.json").bin; typeof bin === "string" ? bin : (bin["lark-cli"] || Object.values(bin)[0])')" \
-    && ln -s "../lib/node_modules/@larksuite/cli/${LARK_CLI_BIN#./}" /usr/bin/lark-cli \
-    && lark-cli --version
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/bin/npx
 
 # Install Docker CLI (for DooD: allows starting sandbox containers via host Docker socket)
-COPY --from=docker:cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=harbor.sensetime.com/infra/docker:cli /usr/local/bin/docker /usr/local/bin/docker
 
 # Install uv (source image overridable via UV_IMAGE build arg)
 COPY --from=uv-source /uv /uvx /usr/local/bin/
@@ -116,8 +117,10 @@ COPY --from=uv-source /uv /uvx /usr/local/bin/
 # Set working directory
 WORKDIR /app
 
-# Copy backend with pre-built virtualenv from builder
+# Copy backend with pre-built virtualenv + baked config from builder
 COPY --from=builder /app/backend ./backend
+COPY --from=builder /app/config.yaml ./config.yaml
+RUN cp ./config.yaml ./backend/config.yaml
 
 # Expose Gateway API port.
 EXPOSE 8001
