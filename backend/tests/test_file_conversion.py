@@ -7,15 +7,19 @@ import sys
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
+from deerflow.utils import file_conversion
 from deerflow.utils.file_conversion import (
     _ASYNC_THRESHOLD_BYTES,
     _MIN_CHARS_PER_PAGE,
     MAX_OUTLINE_ENTRIES,
+    ParseResult,
     _do_convert,
     _get_pdf_converter,
     _pymupdf_output_too_sparse,
     convert_file_to_markdown,
     extract_outline,
+    parse_file_bytes,
+    sanitize_media,
 )
 
 
@@ -485,3 +489,41 @@ class TestExtractOutline:
         assert len(outline) == 1
         # Title must be clean — no ** ** artefacts
         assert outline[0]["title"] == "UNITED STATES SECURITIES AND EXCHANGE COMMISSION"
+
+
+def test_parse_file_bytes_uses_docling(monkeypatch):
+    """Bytes go through Docling DocumentStream — no temp file rewrite."""
+    import sys
+    import types
+
+    seen: dict[str, object] = {}
+
+    class FakeStream:
+        def __init__(self, name, stream):
+            self.name = name
+            self.stream = stream
+
+    def fake_parse(source):
+        seen["name"] = source.name
+        seen["data"] = source.stream.read()
+        return ParseResult(text="# Parsed", parse_quality="ok")
+
+    docling = types.ModuleType("docling")
+    datamodel = types.ModuleType("docling.datamodel")
+    base_models = types.ModuleType("docling.datamodel.base_models")
+    base_models.DocumentStream = FakeStream
+    monkeypatch.setitem(sys.modules, "docling", docling)
+    monkeypatch.setitem(sys.modules, "docling.datamodel", datamodel)
+    monkeypatch.setitem(sys.modules, "docling.datamodel.base_models", base_models)
+    monkeypatch.setattr(file_conversion, "parse_docling", fake_parse)
+
+    result = parse_file_bytes(b"document bytes", "policy.docx")
+
+    assert result.text == "# Parsed"
+    assert seen == {"name": "policy.docx", "data": b"document bytes"}
+
+
+def test_sanitize_media_removes_embedded_payload():
+    payload = "A" * 80
+    text = sanitize_media(f"before\ndata:image/png;base64,{payload}\n\nafter")
+    assert text == "before\n[image]\n\nafter"

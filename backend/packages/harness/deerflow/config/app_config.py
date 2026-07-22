@@ -22,6 +22,7 @@ from deerflow.config.file_signature import ConfigSignature as _ConfigSignature
 from deerflow.config.file_signature import get_config_signature as _get_config_signature
 from deerflow.config.guardrails_config import GuardrailsConfig, load_guardrails_config_from_dict
 from deerflow.config.input_polish_config import InputPolishConfig
+from deerflow.config.knowledge_config import KnowledgeConfig, load_knowledge_config_from_dict
 from deerflow.config.loop_detection_config import LoopDetectionConfig
 from deerflow.config.memory_config import MemoryConfig, load_memory_config_from_dict
 from deerflow.config.model_config import ModelConfig
@@ -254,6 +255,7 @@ class AppConfig(BaseModel):
             field_doc="Unified database backend for run/feedback metadata (memory, sqlite, or postgres).",
         ),
     )
+    knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig, description="Knowledge base / RAG configuration")
     run_events: RunEventsConfig = Field(
         default_factory=RunEventsConfig,
         description=format_field_description(
@@ -434,6 +436,7 @@ class AppConfig(BaseModel):
         load_checkpointer_config_from_dict(config.checkpointer.model_dump() if config.checkpointer is not None else None)
         load_stream_bridge_config_from_dict(config.stream_bridge.model_dump() if config.stream_bridge is not None else None)
         load_acp_config_from_dict({name: agent.model_dump() for name, agent in acp_agents.items()})
+        load_knowledge_config_from_dict(config.knowledge.model_dump())
 
         if previous_checkpointer_config != config.checkpointer:
             # These runtime singletons derive their backend from checkpointer config.

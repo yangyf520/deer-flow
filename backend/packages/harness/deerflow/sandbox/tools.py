@@ -2061,6 +2061,24 @@ def grep_tool(
         return f"Error: Unexpected error searching file contents: {_sanitize_error(e, runtime)}"
 
 
+def read_file_max_chars() -> int:
+    try:
+        sandbox_cfg = get_app_config().sandbox
+        return sandbox_cfg.read_file_output_max_chars if sandbox_cfg else 50000
+    except Exception:
+        return 50000
+
+
+def parse_rich_document(data: bytes, filename: str) -> str:
+    """Parse a non-UTF-8 / Office / PDF document to Markdown via Docling."""
+    from deerflow.utils.file_conversion import parse_file_bytes
+
+    parsed = parse_file_bytes(data, filename)
+    if parsed.parse_quality == "failed" or not (parsed.text or "").strip():
+        return f"Error: {parsed.error or f'parse failed for {filename}'}"
+    return parsed.text
+
+
 async def _grep_tool_async(
     runtime: Runtime,
     description: str,
@@ -2118,7 +2136,8 @@ def read_file_tool(
     start_line: int | None = None,
     end_line: int | None = None,
 ) -> str:
-    """Read the contents of a text file. Use this to examine source code, configuration files, logs, or any text-based file.
+    """Read a file's contents. UTF-8 text is returned directly; PDF / Office /
+    other binary documents are parsed to Markdown automatically (Docling).
 
     Args:
         description: Explain why you are reading this file in short words. ALWAYS PROVIDE THIS PARAMETER FIRST.
@@ -2132,7 +2151,13 @@ def read_file_tool(
             skill_name = _extract_skill_name_from_skills_path(path) or "unknown"
             return f"Error: Skill '{skill_name}' is disabled. Access to its files is blocked. Enable the skill in settings before using it."
         requested_path = path
-        content = read_current_file_content(runtime, path)
+        try:
+            content = read_current_file_content(runtime, path)
+        except UnicodeDecodeError:
+            sandbox = ensure_sandbox_initialized(runtime)
+            content = parse_rich_document(sandbox.download_file(path), Path(requested_path).name)
+            if content.startswith("Error:"):
+                return content
         if not content:
             return "(empty)"
         if start_line is not None or end_line is not None:
@@ -2146,14 +2171,7 @@ def read_file_tool(
             if s > e:
                 return "(start_line > end_line — no lines in range)"
             content = "\n".join(lines[s - 1 : e])
-        try:
-            from deerflow.config.app_config import get_app_config
-
-            sandbox_cfg = get_app_config().sandbox
-            max_chars = sandbox_cfg.read_file_output_max_chars if sandbox_cfg else 50000
-        except Exception:
-            max_chars = 50000
-        return _truncate_read_file_output(content, max_chars)
+        return _truncate_read_file_output(content, read_file_max_chars())
     except SandboxError as e:
         return f"Error: {e}"
     except FileNotFoundError:

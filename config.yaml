@@ -168,11 +168,6 @@ knowledge:
   enabled: true
   parse:
     timeout_seconds: 120
-    docling:
-      do_table_structure: true
-      do_ocr: true
-      generate_picture_images: true
-      enable_chart_understanding: true
   ingest:
     strategy: auto
     chunk_sizes:

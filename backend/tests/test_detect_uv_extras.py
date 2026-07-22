@@ -193,21 +193,34 @@ def test_detect_from_config_dedupes_when_both_present(tmp_path):
     assert detect.detect_from_config(cfg) == ["postgres"]
 
 
+def test_detect_from_config_knowledge_enabled(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("knowledge:\n  enabled: true\n")
+    assert detect.detect_from_config(cfg) == ["knowledge"]
+
+
+def test_detect_from_config_knowledge_with_postgres(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("database:\n  backend: postgres\nknowledge:\n  enabled: true\n")
+    assert detect.detect_from_config(cfg) == ["knowledge", "postgres"]
+
+
 def test_detect_from_config_missing_file_returns_empty(tmp_path):
     assert detect.detect_from_config(tmp_path / "does-not-exist.yaml") == []
 
 
-def test_resolve_extras_env_overrides_config(isolated_cwd, monkeypatch):
+def test_resolve_extras_env_merges_with_config(isolated_cwd, monkeypatch):
+    """UV_EXTRAS adds names; config-detected extras are kept (not wiped)."""
     cfg = isolated_cwd / "config.yaml"
-    cfg.write_text("database:\n  backend: sqlite\n")
+    cfg.write_text("knowledge:\n  enabled: true\n")
     monkeypatch.setenv("UV_EXTRAS", "postgres")
 
-    assert detect.resolve_extras() == ["postgres"]
+    assert detect.resolve_extras() == ["knowledge", "postgres"]
 
 
 def test_resolve_extras_env_supports_multiple(isolated_cwd, monkeypatch):
     monkeypatch.setenv("UV_EXTRAS", "postgres,ollama")
-    assert detect.resolve_extras() == ["postgres", "ollama"]
+    assert detect.resolve_extras() == ["ollama", "postgres"]
 
 
 def test_resolve_extras_detects_redis_url_env_without_config(isolated_cwd, monkeypatch):

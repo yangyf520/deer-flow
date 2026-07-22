@@ -2,7 +2,7 @@
 name = "deerflow-harness"
 version = "2.1.0"
 description = "DeerFlow agent harness framework"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "agent-client-protocol>=0.4.0",
     "agent-sandbox>=0.0.19",
@@ -66,6 +66,20 @@ postgres = [
 # always installs this extra because Docker defaults to the redis bridge.
 redis = ["redis>=5.0.0"]
 pymupdf = ["pymupdf4llm>=0.0.17"]
+# RAG: LlamaIndex ingest/search + Docling parse. chromadb intentionally
+# omitted (pgvector default). Docling parses uploads to Markdown; chunking
+# uses Markdown/Hierarchical node parsers.
+knowledge = [
+    "llama-index-core>=0.14.5,<0.15",
+    "llama-index-embeddings-openai>=0.5.0,<0.7",
+    "llama-index-llms-openai>=0.6.5,<0.8",
+    "llama-index-vector-stores-postgres>=0.5.0",
+    "llama-index-retrievers-bm25>=0.6.0,<0.8",
+    "llama-index-postprocessor-dashscope-rerank>=0.4.0,<0.6",
+    "jieba>=0.42.1",
+    "psycopg2-binary>=2.9.0",
+    "docling>=2.0.0,<3",
+]
 boxlite = ["boxlite>=0.9.7"]
 # Agent observability (Monocle). Optional so a default install stays free of the
 # OpenTelemetry stack; only pulled in when MONOCLE_TRACING is used.

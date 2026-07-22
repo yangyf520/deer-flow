@@ -3,7 +3,7 @@ name = "deer-flow"
 version = "2.1.0"
 description = "LangGraph-based AI agent system with sandbox execution capabilities"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "deerflow-harness",
     "fastapi>=0.115.0",
@@ -26,15 +26,14 @@ dependencies = [
 
 [project.optional-dependencies]
 postgres = ["deerflow-harness[postgres]"]
+knowledge = ["deerflow-harness[knowledge]"]
 redis = ["deerflow-harness[redis]"]
 discord = ["discord.py>=2.7.0"]
 monocle = ["deerflow-harness[monocle]"]
-browser = ["deerflow-harness[browser]"]
 
 [dependency-groups]
 dev = [
     "blockbuster>=1.5.26,<1.6",
-    "hypothesis>=6.100,<7",
     "jsonschema>=4.26.0",
     "prompt-toolkit>=3.0.0",
     "pytest>=9.0.3",
@@ -61,18 +60,10 @@ markers = [
 
 [tool.uv]
 index-url = "https://pypi.org/simple"
-# langgraph-sdk 0.4.2 (pulled in by langgraph 1.2.9 for DeltaChannel) pins
-# `websockets<16,>=14`, silently downgrading websockets 16.0 -> 15.0.1. The
-# pin is not grounded in any API incompatibility: websockets 16's only
-# breaking change is requiring Python >=3.10 (we require >=3.12), the sdk
-# only imports `websockets.asyncio.client`/`websockets.exceptions` (both
-# 16-compatible), and DeerFlow never uses the sdk's WebSocket transport
-# (httpx/SSE only). Pin the exact pre-upgrade 16.0 for the IM channel
-# integrations (dingtalk-stream, python-telegram-bot, etc.) that ran on it
-# before. Remove once langgraph-sdk relaxes the pin upstream. Note: enabling
-# the `openai[realtime]` or `slack-sdk[optional]` extras would conflict (they
-# also cap websockets<16).
-override-dependencies = ["websockets==16.0"]
+constraint-dependencies = [
+    "torch>=2.2.2,<2.3.0; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "torchvision>=0.17.2,<0.18.0; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+]
 
 [tool.uv.workspace]
 members = ["packages/harness"]
