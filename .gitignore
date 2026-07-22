@@ -30,7 +30,7 @@ backend/scripts/benchmark/*.jsonl
 .env
 
 # Configuration files
-config.yaml
+# config.yaml
 mcp_config.json
 extensions_config.json
 
@@ -43,6 +43,7 @@ coverage.xml
 coverage/
 .deer-flow/
 .claude/
+.cursor/
 skills/custom/*
 logs/
 log/

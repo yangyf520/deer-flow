@@ -1,0 +1,305 @@
+models:
+- name: SenseAgent
+  display_name: Sense Agent
+  use: deerflow.models.patched_openai:PatchedChatOpenAI
+  model: $CHAT_MODEL
+  api_key: $CHAT_API_KEY
+  base_url: $CHAT_BASE_URL
+  max_tokens: 4096
+  temperature: 0.7
+  supports_vision: true
+  supports_thinking: true
+  when_thinking_disabled:
+    extra_body:
+      thinking:
+        type: disabled
+tool_groups:
+- name: web
+- name: file:read
+- name: file:write
+- name: bash
+- name: knowledge
+- name: policy_review
+tools:
+- name: web_search
+  group: web
+  use: deerflow.community.tavily.tools:web_search_tool
+  max_results: 5
+- name: web_fetch
+  group: web
+  use: deerflow.community.jina_ai.tools:web_fetch_tool
+  timeout: 10
+- name: image_search
+  group: web
+  use: deerflow.community.image_search.tools:image_search_tool
+  max_results: 5
+- name: ls
+  group: file:read
+  use: deerflow.sandbox.tools:ls_tool
+- name: read_file
+  group: file:read
+  use: deerflow.sandbox.tools:read_file_tool
+- name: write_file
+  group: file:write
+  use: deerflow.sandbox.tools:write_file_tool
+- name: str_replace
+  group: file:write
+  use: deerflow.sandbox.tools:str_replace_tool
+- name: bash
+  group: bash
+  use: deerflow.sandbox.tools:bash_tool
+- name: search
+  group: knowledge
+  use: deerflow.knowledge.tools:search_tool
+- name: policy_prepare
+  group: policy_review
+  use: deerflow.policy_review.tools:prepare_tool
+- name: policy_retrieve
+  group: policy_review
+  use: deerflow.policy_review.tools:retrieve_tool
+- name: policy_finalize
+  group: policy_review
+  use: deerflow.policy_review.tools:finalize_tool
+sandbox:
+  use: deerflow.sandbox.local:LocalSandboxProvider
+  allow_host_bash: true
+  bash_output_max_chars: 20000
+  read_file_output_max_chars: 50000
+  ls_output_max_chars: 20000
+  bash_command_timeout: 600
+skills:
+  container_path: /mnt/skills
+title:
+  enabled: true
+  max_words: 6
+  max_chars: 60
+  model_name: null
+summarization:
+  enabled: true
+  model_name: null
+  trigger:
+  - type: tokens
+    value: 15564
+  keep:
+    type: messages
+    value: 10
+  trim_tokens_to_summarize: 15564
+  summary_prompt: null
+  preserve_recent_skill_count: 5
+  preserve_recent_skill_tokens: 25000
+  preserve_recent_skill_tokens_per_skill: 5000
+  skill_file_read_tool_names:
+  - read_file
+  - read
+  - view
+  - cat
+memory:
+  enabled: true
+  storage_path: memory.json
+  debounce_seconds: 30
+  model_name: null
+  max_facts: 100
+  fact_confidence_threshold: 0.7
+  injection_enabled: true
+  max_injection_tokens: 2000
+  shutdown_flush_timeout_seconds: 30.0
+  manager_class: deermem
+  mode: middleware
+  backend_config:
+    storage_path: ''
+    debounce_seconds: 30
+    model: null
+    max_facts: 100
+    fact_confidence_threshold: 0.7
+    max_injection_tokens: 2000
+    token_counting: tiktoken
+    guaranteed_categories:
+    - correction
+    guaranteed_token_budget: 500
+    staleness_review_enabled: true
+    staleness_age_days: 90
+    staleness_min_candidates: 3
+    staleness_max_removals_per_cycle: 10
+    staleness_protected_categories:
+    - correction
+    staleness_max_lifetime_multiplier: 20.0
+    staleness_max_extension_days: 3650
+    consolidation_enabled: false
+    consolidation_min_facts: 8
+    consolidation_max_groups_per_cycle: 3
+    consolidation_max_sources: 8
+config_version: 29
+log_level: info
+token_usage:
+  enabled: false
+tool_search:
+  enabled: false
+  auto_promote_top_k: 3
+uploads:
+  pdf_converter: auto
+  max_files: 10
+  max_file_size: 52428800
+  max_total_size: 104857600
+  auto_convert_documents: false
+skill_evolution:
+  enabled: false
+  moderation_model_name: null
+  security_fail_closed: true
+checkpointer:
+  type: postgres
+  connection_string: $DATABASE_URL
+loop_detection:
+  enabled: true
+  warn_threshold: 3
+  hard_limit: 5
+  window_size: 20
+  max_tracked_threads: 100
+  tool_freq_warn: 30
+  tool_freq_hard_limit: 50
+agents_api:
+  enabled: true
+database:
+  backend: postgres
+  postgres_url: $DATABASE_URL
+  sqlite_dir: .deer-flow/data
+  pool_recycle: 300
+  command_timeout: 30
+knowledge:
+  enabled: true
+  parse:
+    timeout_seconds: 120
+    docling:
+      do_table_structure: true
+      do_ocr: true
+      generate_picture_images: true
+      enable_chart_understanding: true
+  ingest:
+    strategy: auto
+    chunk_sizes:
+    - 1024
+    - 256
+    chunk_overlap: 64
+    title_prefix: true
+    media_sanitize: true
+    annotate_block: true
+  embed:
+    use: llama_index.embeddings.openai:OpenAIEmbedding
+    model: $EMBED_MODEL
+    api_key: $EMBED_API_KEY
+    api_base: $EMBED_BASE_URL
+    embed_dim: 1024
+    embed_batch_size: 10
+  vector_store:
+    type: pgvector
+    connection_string: $DATABASE_URL
+    table_name: knowledge_embed
+    embed_dim: 1024
+  retrieval:
+    hybrid: true
+    bm25: true
+    bm25_tokenizer: jieba
+    fusion_num_queries: 3
+    rerank: true
+    rerank_use: llama_index.postprocessor.dashscope_rerank:DashScopeRerank
+    rerank_model: $RERANK_MODEL
+    rerank_api_key: $RERANK_API_KEY
+    parent_expand: true
+    retrieve_n: 40
+    top_k: 8
+    score: 0.35
+    snippet_max_chars: 1200
+    query_llm:
+      enabled: true
+      use: llama_index.llms.openai:OpenAI
+      model: $CHAT_MODEL
+      api_key: $CHAT_API_KEY
+      api_base: $CHAT_BASE_URL
+      auto: true
+    fusion_mode: reciprocal_rerank
+  scenarios:
+  - type: general-qa
+    top_k: 8
+    score: 0.35
+  - type: policy-review
+    top_k: 10
+    score: 0.3
+    merge_mode: slot_then_rrf
+    lanes:
+    - kinds:
+      - policy
+      tags:
+      - statute
+      - national-law
+      budget: 4
+    - kinds:
+      - policy
+      tags:
+      - company-policy
+      budget: 3
+    - kinds:
+      - reference
+      budget: 2
+    - kinds:
+      - case
+      budget: 3
+  - type: finance-review
+    top_k: 8
+    score: 0.32
+  - type: onboarding
+    top_k: 6
+    score: 0.35
+  authz:
+    system_admin_is_space_admin: true
+    allow_user_create_space: true
+run_events:
+  backend: db
+  max_trace_content: 10240
+  track_token_usage: true
+logging:
+  enhance:
+    enabled: false
+    format: text
+token_budget:
+  enabled: false
+  max_tokens: 200000
+  max_input_tokens: null
+  max_output_tokens: null
+  warn_threshold: 0.8
+  hard_stop_threshold: 1.0
+max_recursion_limit: 1000
+tool_output:
+  enabled: true
+  externalize_min_chars: 12000
+  preview_head_chars: 2000
+  preview_tail_chars: 1000
+  fallback_max_chars: 30000
+  fallback_head_chars: 8000
+  fallback_tail_chars: 3000
+  storage_subdir: .tool-results
+  exempt_tools:
+  - read_file
+  - read_file_tool
+suggestions:
+  enabled: true
+input_polish:
+  enabled: true
+  max_chars: 4000
+  model_name: null
+read_before_write:
+  enabled: true
+safety_finish_reason:
+  enabled: true
+skill_scan:
+  enabled: true
+scheduler:
+  enabled: false
+  poll_interval_seconds: 5
+  lease_seconds: 120
+  max_concurrent_runs: 3
+  min_once_delay_seconds: 60
+run_ownership:
+  lease_seconds: 30
+  grace_seconds: 10
+  heartbeat_enabled: false
+authorization:
+  enabled: false

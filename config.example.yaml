@@ -648,7 +648,8 @@ tool_groups:
   - name: file:read
   - name: file:write
   - name: bash
-  - name: browser
+  - name: knowledge
+  - name: policy_review
 
 # ============================================================================
 # Tools Configuration
@@ -802,65 +803,6 @@ tools:
   #   # allow_private_addresses: false      # SSRF guard: keep false in production. Set true ONLY to
   #   #                                     # capture internal/private targets (loopback, RFC1918, etc.)
 
-  # Agentic browser control (stateful navigate → observe → click/type loop).
-  # Unlike web_fetch/web_capture (read-only, stateless), these tools keep a live
-  # per-thread Playwright browser so the agent can interact with JavaScript-heavy
-  # pages, fill forms, and follow multi-step flows. Elements are addressed by the
-  # numeric [ref] index returned in each page snapshot.
-  #
-  # Requires the optional dependency, installed once per environment:
-  #   cd backend && uv sync --extra browser && uv run playwright install chromium
-  # make dev / Docker startup auto-detect an active browser_navigate entry and
-  # preserve the browser extra during dependency sync.
-  #
-  # Uncomment the whole block to enable. Launch and URL-policy settings are read
-  # canonically from browser_navigate and shared by every browser tool + Live.
-  # - name: browser_navigate
-  #   group: browser
-  #   use: deerflow.community.browser_automation.tools:browser_navigate_tool
-  #   headless: true                   # Set false only for local, trusted debugging
-  #   timeout_ms: 30000                # Per-action navigation/interaction timeout
-  #   viewport_width: 1280
-  #   viewport_height: 720
-  #   # allow_private_addresses: false # SSRF guard: keep false in production
-  #   # cdp_url: http://127.0.0.1:9222 # Attach to YOUR running Chrome (Codex-style)
-  #   # allow_unguarded_cdp: false      # REQUIRED true with cdp_url: attaching to an
-  #   #                                # existing Chrome prevents DeerFlow from
-  #   #                                # enforcing its subresource/redirect SSRF guard.
-  #   #                                # instead of launching a private headless one.
-  #   #                                # Start Chrome with --remote-debugging-port=9222
-  #   #                                # so you watch the agent drive your real browser
-  #   #                                # with your real login sessions. Local/trusted only;
-  #   #                                # never enable for an untrusted CDP endpoint.
-  #   #                                # Chrome must be version-matched to the bundled
-  #   #                                # Playwright; a much newer Chrome can reject the
-  #   #                                # CDP handshake. If so, use headless: false to launch
-  #   #                                # Playwright's own visible browser instead.
-  #   # Multi-worker note: browser sessions live in one Gateway worker's memory.
-  #   # Keep GATEWAY_WORKERS=1 while this tool group is enabled.
-  # - name: browser_snapshot
-  #   group: browser
-  #   use: deerflow.community.browser_automation.tools:browser_snapshot_tool
-  # - name: browser_click
-  #   group: browser
-  #   use: deerflow.community.browser_automation.tools:browser_click_tool
-  # - name: browser_type
-  #   group: browser
-  #   use: deerflow.community.browser_automation.tools:browser_type_tool
-  # - name: browser_get_text
-  #   group: browser
-  #   use: deerflow.community.browser_automation.tools:browser_get_text_tool
-  #   max_chars: 8000                  # Truncation cap for browser_get_text output
-  # - name: browser_back
-  #   group: browser
-  #   use: deerflow.community.browser_automation.tools:browser_back_tool
-  # - name: browser_screenshot
-  #   group: browser
-  #   use: deerflow.community.browser_automation.tools:browser_screenshot_tool
-  # - name: browser_close
-  #   group: browser
-  #   use: deerflow.community.browser_automation.tools:browser_close_tool
-
   # Web fetch tool (uses Exa)
   # NOTE: Only one web_fetch provider can be active at a time.
   # Comment out the Jina AI web_fetch entry below before enabling this one.
@@ -989,6 +931,22 @@ tools:
   - name: bash
     group: bash
     use: deerflow.sandbox.tools:bash_tool
+
+  # Knowledge search (requires knowledge.enabled + uv extra knowledge)
+  - name: search
+    group: knowledge
+    use: deerflow.knowledge.tools:search_tool
+
+  # Policy / legal machine pre-review tools (prefixed names; dedicated group)
+  - name: policy_prepare
+    group: policy_review
+    use: deerflow.policy_review.tools:prepare_tool
+  - name: policy_retrieve
+    group: policy_review
+    use: deerflow.policy_review.tools:retrieve_tool
+  - name: policy_finalize
+    group: policy_review
+    use: deerflow.policy_review.tools:finalize_tool
 
 # ============================================================================
 # Tool Search Configuration (Deferred Tool Loading)
@@ -1445,7 +1403,6 @@ sandbox:
 #     description: Claude Code for implementation, refactoring, and debugging
 #     model: null
 #     # auto_approve_permissions: false  # Set to true to auto-approve ACP permission requests
-#     # timeout_seconds: 1800            # Abort + kill the subprocess if it doesn't respond in time (default: 1800 = 30 min)
 #     # env:                             # Optional: inject environment variables into the agent subprocess
 #     #   ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY  # $VAR resolves from host environment
 #
@@ -1522,11 +1479,7 @@ title:
 summarization:
   enabled: true
 
-  # Model to use for summarization.
-  #   null = summarize with the model the run actually uses (the lead run's model, a
-  #          subagent's own model, or a thread's custom-agent model), NOT models[0].
-  #   set  = that model generates; if its provider fails, compaction falls back to the
-  #          run's own model so a broken summary provider cannot disable compaction.
+  # Model to use for summarization (null = use default model)
   # Recommended: Use a lightweight, cost-effective model like "gpt-4o-mini" or similar
   model_name: null
 
@@ -1643,16 +1596,7 @@ memory:
   # Each backend self-interprets it (DeerMem parses it into DeerMemConfig).
   backend_config:
     storage_path: ""            # empty = deer-flow base_dir (factory injects absolute runtime_home); a non-empty path is the root DIRECTORY (per-user memory under {storage_path}/users/{uid}/memory.json)
-    storage_class: file         # file (default) or a dotted MemoryStorage class path; invalid persistent backends fail fast
-    strict_user_scope: false    # set true in authenticated deployments after all callers propagate user_id
-    manifest_filename: memory.json # user-global JSON: version/revision/time + user/history only; no facts or fact index
-    file_lock_timeout_seconds: 10 # per-scope cross-process advisory lock timeout (single-machine local filesystem)
-    retrieval_adapter: ""       # optional dotted factory(config) supplied by the retrieval module
     debounce_seconds: 30 # Wait time before processing queued updates
-    # Backpressure cap on pending items. 0 = unlimited. At the cap, new
-    # non-signal updates are rejected (QueueFull); signal updates are always
-    # admitted so important memories are never shed.
-    queue_max_depth: 1000
     model:                      # LLM for memory extraction; omit all fields = no extraction (non-LLM ops still work; an update raises)
       # provider: openai
       # model: gpt-4o-mini
@@ -1700,9 +1644,6 @@ memory:
     consolidation_min_facts: 8         # min facts in one category to trigger review (3-30)
     consolidation_max_groups_per_cycle: 3  # max groups merged per update cycle (1-10)
     consolidation_max_sources: 8       # max source facts per consolidation group (2-20)
-    # extraction_callback is a host-injected post-extraction observability hook
-    # (token usage, facts accepted/rejected, rejection rate). The factory
-    # injects a logging default; set programmatically to emit a Langfuse span.
     # Message processing (externalized patterns / prompt templates):
     #   patterns_dir        - dir with correction.yaml / reinforcement.yaml overriding
     #                         the bundled signal-detection patterns. None (default) =
@@ -1809,9 +1750,68 @@ database:
   # App ORM PostgreSQL command timeout. Set to null to disable it or raise it
   # for intentionally long commands.
   command_timeout: 30
-  # Restart required. Use one value across every process sharing this database.
-  # full: current full-message checkpoints; delta: DeltaChannel for messages.
-  checkpoint_channel_mode: full
+
+# ============================================================================
+# Knowledge / RAG
+# ============================================================================
+# Switch vector backends with vector_store.type only (reindex after switch).
+# Install LlamaIndex stack: make dev auto-detects knowledge.enabled, or
+#   cd backend && uv sync --all-packages --extra knowledge
+#
+# knowledge:
+#   enabled: true
+#   grounding:
+#     enabled: true          # bound spaces: auto-retrieve + citation gate
+#     max_items: 8
+#     snippet_chars: 400
+#     min_answer_chars: 80   # skip gate for short replies (greetings)
+#   embed:
+#     use: llama_index.embeddings.openai:OpenAIEmbedding
+#     model: $EMBED_MODEL
+#     api_key: $EMBED_API_KEY
+#     api_base: $EMBED_BASE_URL
+#     embed_dim: 1536
+#     embed_batch_size: 10  # DashScope compatible APIs require ≤10
+#   vector_store:
+#     # --- pgvector (Postgres) ---
+#     type: pgvector
+#     connection_string: $DATABASE_URL
+#     # host: localhost
+#     # port: 5432
+#     # database: deerflow
+#     # user: $POSTGRES_USER
+#     # password: $POSTGRES_PASSWORD
+#     table_name: knowledge_embed
+#     embed_dim: 1536
+#     # --- chroma (local disk) ---
+#     # type: chroma
+#     # persist_dir: .deer-flow/knowledge/vectors
+#     # --- milvus ---
+#     # type: milvus
+#     # uri: http://localhost:19530
+#     # token: $MILVUS_TOKEN
+#     # collection_name: deerflow_knowledge
+#   scenarios:
+#     - type: general-qa
+#       top_k: 8
+#       score: 0.35
+#     # Multi-lane scenario used by policy_review retrieve / knowledge search
+#     - type: policy-review
+#       top_k: 10
+#       score: 0.3
+#       merge_mode: slot_then_rrf
+#       fusion_num_queries: 1
+#       lanes:
+#         - kinds: [policy]
+#           tags: [statute, national-law]
+#           budget: 4
+#         - kinds: [policy]
+#           tags: [company-policy]
+#           budget: 3
+#         - kinds: [reference]
+#           budget: 2
+#         - kinds: [case]
+#           budget: 3
 
 # ============================================================================
 # Run Events Configuration
@@ -1830,29 +1830,6 @@ run_events:
   backend: memory
   max_trace_content: 10240
   track_token_usage: true
-
-# ============================================================================
-# Agent Storage Configuration
-# ============================================================================
-# Where custom agent DEFINITIONS (config.yaml + SOUL.md) are stored. This is
-# separate from `database` (run/thread/event data) and from agent memory.
-# Restart-required (the backend is captured at Gateway lifespan startup).
-#
-# backend: file  -- Per-user files under {base_dir}/users/{uid}/agents/ (default).
-#                   Single-node only: an agent created on one node is invisible
-#                   to other nodes without a shared mount.
-# backend: db    -- A row per agent in the shared SQL persistence layer, so every
-#                   node sees the same agents. Requires database.backend to be
-#                   'sqlite' or 'postgres' (rejected at startup on 'memory').
-#
-# Switching an existing install to 'db'? Import the on-disk agents once with:
-#     python backend/scripts/migrate_agents_to_db.py   # --dry-run to preview
-# The source files are left in place, so reverting to 'file' is a clean rollback.
-#
-# agent_storage:
-#   backend: file
-agent_storage:
-  backend: file
 
 # ============================================================================
 # Scheduled Tasks Configuration
@@ -1894,11 +1871,6 @@ scheduler:
 # grace_seconds if your environment cannot keep clocks within a few seconds;
 # the trade-off is longer recovery latency for genuinely dead workers
 # (lease_seconds + grace_seconds from last heartbeat to reclaim).
-#
-# The owning worker itself does NOT use grace_seconds as extra execution time.
-# If renewal cannot be confirmed before lease_seconds expires, it cancels the
-# local run and suppresses durable finalization; grace_seconds only delays when
-# a peer may reclaim the expired row.
 
 run_ownership:
   lease_seconds: 30           # Seconds before a run lease expires if not renewed.
@@ -1920,14 +1892,12 @@ run_ownership:
 #
 # stream_bridge:
 #   type: memory                 # single-process only
-#   queue_maxsize: 256           # data events retained per run. A reconnect
-#                                # older than this window receives SSE `gap`.
+#   queue_maxsize: 256
 #
 # stream_bridge:
 #   type: redis                  # recommended for Docker / multi-worker gateway
 #   redis_url: redis://redis:6379/0
-#   queue_maxsize: 256           # data events retained per run (Redis MAXLEN).
-#                                # Older valid cursors receive SSE `gap`.
+#   queue_maxsize: 256           # events retained per run (redis stream MAXLEN)
 #   stream_ttl_seconds: 86400    # rolling TTL for retained stream buffers.
 #                                # Refreshed on each publish/publish_end; set 0
 #                                # to disable. This is not a run timeout.
@@ -2142,28 +2112,9 @@ run_ownership:
 # Authorization Configuration
 # ============================================================================
 # Fine-grained resource authorization (RBAC and beyond). Disabled by default;
-# every authenticated user has access to all resources.
+# every authenticated user has access to all resources. Schema is present but
+# inert; the built-in RBAC provider and runtime wiring arrive in subsequent phases.
 # See RFC: https://github.com/bytedance/deer-flow/issues/4063
-#
-# authorization:
-#   enabled: true
-#   fail_closed: true            # block on provider error / unresolved identity
-#   default_role: user           # applied when user_role is None; built-in RBAC requires this role below
-#   provider:
-#     use: deerflow.authz.rbac:RbacAuthorizationProvider
-#     config:
-#       # A known role with no policy for a resource is unrestricted for it.
-#       # Define both `tools` and `routes` wherever access should be constrained.
-#       roles:
-#         admin:
-#           tools: {allow: "*"}
-#           routes: {allow: "*"}
-#         user:
-#           tools: {allow: "*", deny: ["update_agent"]}
-#           routes: {allow: "*"}
-#         guest:
-#           tools: {allow: ["web_search", "read_file"]}
-#           routes: {allow: ["threads:read", "runs:read"]}
 authorization:
   enabled: false
 
