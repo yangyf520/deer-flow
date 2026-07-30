@@ -1,0 +1,381 @@
+import { fetch } from "../api/fetcher";
+import { getBackendBaseURL } from "../config";
+
+export const SPACE_ACCESS_VALUES = ["open", "members", "private"] as const;
+export type SpaceAccessValue = (typeof SPACE_ACCESS_VALUES)[number];
+
+export const SPACE_ROLE_VALUES = [
+  "viewer",
+  "editor",
+  "publisher",
+  "admin",
+] as const;
+export type SpaceRoleValue = (typeof SPACE_ROLE_VALUES)[number];
+
+export type Space = {
+  id: string;
+  name: string;
+  description?: string | null;
+  access: string;
+  owner_user_id: string;
+  allowed_kinds: string[];
+  /** Bound config scenarios[].type */
+  scenario?: string | null;
+  default_scenarios: string[];
+  knowledge_version?: string;
+  my_role?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type ScenarioPack = {
+  description?: string;
+  type: string;
+  top_k?: number | null;
+  score?: number | null;
+  /** Kind ids from scenario lanes; empty = single-path retrieve. */
+  kinds?: string[];
+};
+
+export type ScenariosListResponse = {
+  items: ScenarioPack[];
+  total: number;
+};
+
+export type KnowledgeKind = {
+  id: string;
+};
+
+export type KindsListResponse = {
+  items: KnowledgeKind[];
+  total: number;
+};
+
+export type SpacesListResponse = {
+  items: Space[];
+  total: number;
+};
+
+export type SpaceGrant = {
+  id: string;
+  space_id: string;
+  subject_type: "user" | "dept";
+  subject_id: string;
+  subject_name?: string | null;
+  role: SpaceRoleValue;
+  granted_by?: string | null;
+  created_at?: string | null;
+};
+
+export type SpaceGrantsListResponse = {
+  items: SpaceGrant[];
+  total: number;
+};
+
+export type KnowledgeDocument = {
+  id: string;
+  space_id: string;
+  title: string;
+  kind: string;
+  status: string;
+  source_filename: string;
+  job_phase: string;
+  progress: number;
+  parse_quality?: string | null;
+  parse_error?: string | null;
+  error_message?: string | null;
+  created_by?: string | null;
+  /** Display name for uploader (email local-part); prefer over created_by UUID */
+  created_by_name?: string | null;
+  created_at?: string | null;
+  tags?: string[];
+  effective_from?: string | null;
+  effective_to?: string | null;
+};
+
+export type DocumentsListResponse = {
+  items: KnowledgeDocument[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type DocumentImportResponse = {
+  doc_id: string;
+  status: string;
+  job_phase: string;
+  progress: number;
+  deduped?: boolean;
+  message?: string | null;
+};
+
+export type EvidenceItem = {
+  id: string;
+  source: string;
+  kind: string;
+  title: string;
+  snippet: string;
+  score?: number | null;
+  citable_as?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type EvidencePackResponse = {
+  knowledge_version: string;
+  trace_id: string;
+  items: EvidenceItem[];
+  answer?: string | null;
+};
+
+const base = () => `${getBackendBaseURL()}/api/knowledge/v1`;
+
+async function readJson<T>(res: Response, fallback: string): Promise<T> {
+  if (!res.ok) {
+    let detail = fallback;
+    try {
+      const body = await res.json();
+      const d = body.detail ?? body;
+      if (typeof d === "string") {
+        detail = d;
+      } else if (d && typeof d === "object" && "message" in d) {
+        detail = String((d as { message: unknown }).message);
+      } else {
+        detail = JSON.stringify(d);
+      }
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`${fallback}: ${detail}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function listScenarios(): Promise<ScenariosListResponse> {
+  const res = await fetch(`${base()}/scenarios`);
+  return readJson(res, "Failed to list scenarios");
+}
+
+export async function listKinds(): Promise<KindsListResponse> {
+  const res = await fetch(`${base()}/kinds`);
+  return readJson(res, "Failed to list kinds");
+}
+
+export async function listMySpaces(): Promise<SpacesListResponse> {
+  const res = await fetch(`${base()}/spaces/me`);
+  return readJson(res, "Failed to list spaces");
+}
+
+export async function createSpace(input: {
+  name: string;
+  description?: string;
+  access?: string;
+  id?: string;
+  scenario: string;
+  allowed_kinds?: string[];
+}): Promise<Space> {
+  const res = await fetch(`${base()}/spaces`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return readJson(res, "Failed to create space");
+}
+
+export async function updateSpace(
+  spaceId: string,
+  input: {
+    scenario?: string;
+    name?: string;
+    description?: string;
+    access?: string;
+    allowed_kinds?: string[];
+    knowledge_version?: string;
+  },
+): Promise<Space> {
+  const res = await fetch(`${base()}/spaces/${encodeURIComponent(spaceId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return readJson(res, "Failed to update space");
+}
+
+export async function getSpace(spaceId: string): Promise<Space> {
+  const res = await fetch(`${base()}/spaces/${encodeURIComponent(spaceId)}`);
+  return readJson(res, "Failed to get space");
+}
+
+export async function listGrants(
+  spaceId: string,
+): Promise<SpaceGrantsListResponse> {
+  const res = await fetch(
+    `${base()}/spaces/${encodeURIComponent(spaceId)}/grants`,
+  );
+  return readJson(res, "Failed to list grants");
+}
+
+export async function upsertGrant(
+  spaceId: string,
+  input: {
+    subject_type: "user" | "dept";
+    subject_id: string;
+    role: SpaceRoleValue;
+  },
+): Promise<SpaceGrant> {
+  const res = await fetch(
+    `${base()}/spaces/${encodeURIComponent(spaceId)}/grants`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  return readJson(res, "Failed to update grant");
+}
+
+export async function deleteGrant(
+  spaceId: string,
+  subjectType: "user" | "dept",
+  subjectId: string,
+): Promise<void> {
+  const res = await fetch(
+    `${base()}/spaces/${encodeURIComponent(spaceId)}/grants/${encodeURIComponent(subjectType)}/${encodeURIComponent(subjectId)}`,
+    { method: "DELETE" },
+  );
+  if (res.status === 204 || res.ok) return;
+  await readJson(res, "Failed to delete grant");
+}
+
+export async function listDocuments(
+  spaceId: string,
+  limit = 20,
+  offset = 0,
+  kind?: string,
+  q?: string,
+): Promise<DocumentsListResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  if (kind) params.set("kind", kind);
+  if (q?.trim()) params.set("q", q.trim());
+  const res = await fetch(
+    `${base()}/spaces/${encodeURIComponent(spaceId)}/documents?${params.toString()}`,
+  );
+  return readJson(res, "Failed to list documents");
+}
+
+export async function importDocument(
+  spaceId: string,
+  file: File,
+  opts: { kind: string; title?: string; tags?: string[] },
+): Promise<DocumentImportResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("kind", opts.kind);
+  if (opts.title) form.append("title", opts.title);
+  for (const tag of opts.tags ?? []) {
+    if (tag.trim()) form.append("tags", tag.trim());
+  }
+  const res = await fetch(
+    `${base()}/spaces/${encodeURIComponent(spaceId)}/documents/import`,
+    {
+      method: "POST",
+      body: form,
+    },
+  );
+  return readJson(res, "Failed to import document");
+}
+
+export async function updateDocument(
+  spaceId: string,
+  docId: string,
+  input: {
+    kind?: string;
+    tags?: string[];
+    effective_from?: string | null;
+    effective_to?: string | null;
+    title?: string;
+  },
+): Promise<KnowledgeDocument> {
+  const res = await fetch(
+    `${base()}/spaces/${encodeURIComponent(spaceId)}/documents/${encodeURIComponent(docId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  return readJson(res, "Failed to update document");
+}
+
+export async function deleteDocument(
+  spaceId: string,
+  docId: string,
+): Promise<void> {
+  const res = await fetch(
+    `${base()}/spaces/${encodeURIComponent(spaceId)}/documents/${encodeURIComponent(docId)}`,
+    { method: "DELETE" },
+  );
+  if (res.status === 204 || res.ok) return;
+  await readJson(res, "Failed to delete document");
+}
+
+export async function reindexDocument(
+  spaceId: string,
+  docId: string,
+  file: File,
+): Promise<DocumentImportResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(
+    `${base()}/spaces/${encodeURIComponent(spaceId)}/documents/${encodeURIComponent(docId)}/reindex`,
+    { method: "POST", body: form },
+  );
+  return readJson(res, "Failed to reindex document");
+}
+
+export type DocumentChunk = {
+  id: string;
+  index: number;
+  text: string;
+  char_count: number;
+  block?: string | null;
+  heading_path?: string | null;
+  page?: string | number | null;
+  parse_quality?: string | null;
+};
+
+export type DocumentChunksResponse = {
+  doc_id: string;
+  title: string;
+  source_filename: string;
+  parse_quality?: string | null;
+  parse_error?: string | null;
+  items: DocumentChunk[];
+  total: number;
+};
+
+export async function listDocumentChunks(
+  spaceId: string,
+  docId: string,
+): Promise<DocumentChunksResponse> {
+  const res = await fetch(
+    `${base()}/spaces/${encodeURIComponent(spaceId)}/documents/${encodeURIComponent(docId)}/chunks`,
+  );
+  return readJson(res, "Failed to list document chunks");
+}
+
+export async function searchKnowledge(input: {
+  query: string;
+  spaces?: string[];
+  scenario?: string;
+  top_k?: number;
+}): Promise<EvidencePackResponse> {
+  const res = await fetch(`${base()}/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return readJson(res, "Failed to search");
+}
