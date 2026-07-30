@@ -114,12 +114,12 @@ export function ChatListRow({
         onSuccess: () => setDeleteOpen(false),
         onError: (err) => {
           toast.error(
-            err instanceof Error ? err.message : t.chats.deleteFailed,
+            err instanceof Error ? err.message : t.common.deleteFailed,
           );
         },
       },
     );
-  }, [deleteThread, selected, t.chats.deleteFailed, thread.thread_id]);
+  }, [deleteThread, selected, t.common.deleteFailed, thread.thread_id]);
 
   const submitRename = useCallback(() => {
     const next = renameValue.trim();
@@ -224,7 +224,7 @@ export function ChatListRow({
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         title={t.common.delete}
-        description={t.chats.deleteConfirm}
+        description={t.common.deleteConfirm}
         confirmLabel={t.common.delete}
         confirmPending={deletePending}
         onConfirm={handleDeleteConfirm}

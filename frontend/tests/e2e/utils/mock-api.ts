@@ -1361,12 +1361,13 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
           body: JSON.stringify(agent),
         });
       }
+      return route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Agent not found" }),
+      });
     }
-    return route.fulfill({
-      status: 404,
-      contentType: "application/json",
-      body: JSON.stringify({ detail: "Agent not found" }),
-    });
+    return route.fallback();
   });
 }
 

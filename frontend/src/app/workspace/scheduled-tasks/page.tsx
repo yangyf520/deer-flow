@@ -3,7 +3,26 @@
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import {
+  AlertError,
+  FormField,
+  ResourceList,
+  ResourceRow,
+  Section,
+  Shell,
+  ShellHeader,
+  SplitView,
+} from "@/components/component";
+import { panelClass } from "@/components/component/styles";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -13,16 +32,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   ScheduledTaskScheduleInput,
   type ScheduleValue,
 } from "@/components/workspace/scheduled-task-schedule-input";
-import {
-  WorkspaceBody,
-  WorkspaceContainer,
-  WorkspaceHeader,
-} from "@/components/workspace/workspace-container";
 import { useI18n } from "@/core/i18n/hooks";
 import {
   useCreateScheduledTask,
@@ -188,27 +205,27 @@ export default function ScheduledTasksPage() {
   }, [selectedTask?.id]);
 
   return (
-    <WorkspaceContainer>
-      <WorkspaceHeader />
-      <WorkspaceBody>
-        <div className="mx-auto flex w-full max-w-(--container-width-md) flex-col gap-4 p-6">
-          <h1 className="text-2xl font-semibold">{t.sidebar.scheduledTasks}</h1>
-          <div
-            className="grid gap-2 rounded-lg border p-4"
-            data-testid="scheduled-task-create-form"
-          >
-            <div className="font-medium">{st.create.title}</div>
+    <>
+      <Shell header={<ShellHeader title={t.sidebar.scheduledTasks} />}>
+        <Card
+          data-testid="scheduled-task-create-form"
+          className={cn(panelClass, "gap-4 py-4")}
+        >
+          <CardHeader className="px-4 pb-0 sm:px-5">
+            <CardTitle className="text-sm font-medium">
+              {st.create.title}
+            </CardTitle>
+            <CardDescription>{st.recipes.label}</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 px-4 sm:px-5">
             <div
-              className="flex flex-wrap items-center gap-1"
+              className="flex flex-wrap items-center gap-1.5"
               data-testid="schedule-recipes"
             >
-              <span className="text-muted-foreground text-sm">
-                {st.recipes.label}:
-              </span>
               {RECIPES.map((recipe) => (
                 <Button
                   key={recipe.id}
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   onClick={() => applyRecipe(recipe)}
                 >
@@ -217,50 +234,57 @@ export default function ScheduledTasksPage() {
                 </Button>
               ))}
             </div>
-            <div className="flex gap-2">
-              <Button
-                variant={
-                  contextMode === "fresh_thread_per_run" ? "default" : "outline"
+            <ToggleGroup
+              type="single"
+              variant="outline"
+              size="sm"
+              value={contextMode}
+              onValueChange={(value) => {
+                if (
+                  value === "fresh_thread_per_run" ||
+                  value === "reuse_thread"
+                ) {
+                  setContextMode(value);
                 }
-                size="sm"
-                onClick={() => setContextMode("fresh_thread_per_run")}
-              >
+              }}
+            >
+              <ToggleGroupItem value="fresh_thread_per_run">
                 {st.context.fresh}
-              </Button>
-              <Button
-                variant={contextMode === "reuse_thread" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setContextMode("reuse_thread")}
-              >
+              </ToggleGroupItem>
+              <ToggleGroupItem value="reuse_thread">
                 {st.context.reuse}
-              </Button>
-            </div>
+              </ToggleGroupItem>
+            </ToggleGroup>
             {contextMode === "reuse_thread" && (
-              <Input
-                value={targetThreadId}
-                onChange={(event) => setTargetThreadId(event.target.value)}
-                placeholder={st.context.threadIdPlaceholder}
-              />
+              <FormField label={st.detail.thread}>
+                <Input
+                  value={targetThreadId}
+                  onChange={(event) => setTargetThreadId(event.target.value)}
+                  placeholder={st.context.threadIdPlaceholder}
+                />
+              </FormField>
             )}
-            <Input
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder={st.create.taskTitle}
-            />
-            <Textarea
-              rows={4}
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder={st.create.prompt}
-            />
+            <FormField label={st.create.taskTitle}>
+              <Input
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder={st.create.taskTitle}
+              />
+            </FormField>
+            <FormField label={st.create.prompt}>
+              <Textarea
+                rows={3}
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder={st.create.prompt}
+              />
+            </FormField>
             <ScheduledTaskScheduleInput
               key={createNonce}
               initial={createSchedule}
               onChange={setCreateSchedule}
             />
-            {formError && (
-              <div className="text-destructive text-sm">{formError}</div>
-            )}
+            {formError && <AlertError>{formError}</AlertError>}
             <Button
               onClick={() => {
                 const hasSchedule =
@@ -315,113 +339,126 @@ export default function ScheduledTasksPage() {
             >
               {st.create.submit}
             </Button>
+          </CardContent>
+        </Card>
+        {threadId && (
+          <p className="text-muted-foreground text-sm">
+            {st.detail.filteredByThread.replace("{id}", threadId)}
+          </p>
+        )}
+        {queryError ? (
+          <AlertError data-testid="scheduled-task-load-error">
+            {st.detail.loadFailed}: {queryError.message}
+          </AlertError>
+        ) : null}
+        <Section
+          eyebrow={st.filters.allStatuses}
+          title={t.sidebar.scheduledTasks}
+          description={String(filteredData.length)}
+        >
+          <div className="flex flex-col gap-3">
+            <ToggleGroup
+              type="single"
+              variant="outline"
+              size="sm"
+              className="flex-wrap"
+              value={statusFilter}
+              onValueChange={(value) => {
+                if (
+                  value === "all" ||
+                  value === "enabled" ||
+                  value === "paused" ||
+                  value === "running" ||
+                  value === "completed" ||
+                  value === "failed"
+                ) {
+                  setStatusFilter(value);
+                }
+              }}
+            >
+              <ToggleGroupItem value="all">
+                {st.filters.allStatuses}
+              </ToggleGroupItem>
+              <ToggleGroupItem value="enabled">
+                {st.filters.enabled}
+              </ToggleGroupItem>
+              <ToggleGroupItem value="paused">
+                {st.filters.paused}
+              </ToggleGroupItem>
+              <ToggleGroupItem value="completed">
+                {st.filters.completed}
+              </ToggleGroupItem>
+              <ToggleGroupItem value="failed">
+                {st.filters.failed}
+              </ToggleGroupItem>
+            </ToggleGroup>
+            <ToggleGroup
+              type="single"
+              variant="outline"
+              size="sm"
+              value={typeFilter}
+              onValueChange={(value) => {
+                if (value === "all" || value === "once" || value === "cron") {
+                  setTypeFilter(value);
+                }
+              }}
+            >
+              <ToggleGroupItem value="all">
+                {st.filters.allTypes}
+              </ToggleGroupItem>
+              <ToggleGroupItem value="cron">{st.filters.cron}</ToggleGroupItem>
+              <ToggleGroupItem value="once">{st.filters.once}</ToggleGroupItem>
+            </ToggleGroup>
           </div>
-          {threadId && (
-            <div className="text-muted-foreground text-sm">
-              {st.detail.filteredByThread.replace("{id}", threadId)}
-            </div>
-          )}
-          {queryError ? (
-            <div
-              className="text-destructive text-sm"
-              data-testid="scheduled-task-load-error"
-            >
-              {st.detail.loadFailed}: {queryError.message}
-            </div>
-          ) : null}
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant={statusFilter === "all" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setStatusFilter("all")}
-            >
-              {st.filters.allStatuses}
-            </Button>
-            <Button
-              variant={statusFilter === "enabled" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setStatusFilter("enabled")}
-            >
-              {st.filters.enabled}
-            </Button>
-            <Button
-              variant={statusFilter === "paused" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setStatusFilter("paused")}
-            >
-              {st.filters.paused}
-            </Button>
-            <Button
-              variant={statusFilter === "completed" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setStatusFilter("completed")}
-            >
-              {st.filters.completed}
-            </Button>
-            <Button
-              variant={statusFilter === "failed" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setStatusFilter("failed")}
-            >
-              {st.filters.failed}
-            </Button>
-            <Button
-              variant={typeFilter === "all" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setTypeFilter("all")}
-            >
-              {st.filters.allTypes}
-            </Button>
-            <Button
-              variant={typeFilter === "cron" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setTypeFilter("cron")}
-            >
-              {st.filters.cron}
-            </Button>
-            <Button
-              variant={typeFilter === "once" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setTypeFilter("once")}
-            >
-              {st.filters.once}
-            </Button>
-          </div>
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-            <div
-              data-testid="scheduled-task-list"
-              className="flex flex-col gap-3"
-            >
-              {filteredData.map((task) => {
-                const isSelected = selectedTask?.id === task.id;
-                return (
-                  <button
-                    type="button"
-                    key={task.id}
-                    onClick={() => setSelectedTaskId(task.id)}
-                    data-testid={`scheduled-task-item-${task.id}`}
-                    className={cn(
-                      "rounded-lg border p-4 text-left",
-                      isSelected ? "border-foreground" : "border-border",
-                    )}
-                  >
-                    <div className="font-medium">{task.title}</div>
-                    <div className="text-muted-foreground text-sm">
-                      {taskSummary(task)}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-            <div
-              className="rounded-lg border p-4"
+        </Section>
+
+        <SplitView
+          primary={
+            <Card className={cn(panelClass, "min-w-0 gap-0 py-0")}>
+              <CardHeader className="border-border/40 border-b px-4 py-3.5">
+                <CardTitle className="text-base font-semibold tracking-tight">
+                  {st.filters.allStatuses}
+                </CardTitle>
+                <CardDescription className="text-xs tabular-nums">
+                  {filteredData.length}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-0">
+                <ScrollArea className="max-h-[min(60vh,32rem)]">
+                  <ResourceList data-testid="scheduled-task-list">
+                    {filteredData.map((task) => {
+                      const isSelected = selectedTask?.id === task.id;
+                      return (
+                        <ResourceRow
+                          key={task.id}
+                          title={task.title}
+                          description={taskSummary(task)}
+                          selected={isSelected}
+                          onClick={() => setSelectedTaskId(task.id)}
+                          data-testid={`scheduled-task-item-${task.id}`}
+                        />
+                      );
+                    })}
+                  </ResourceList>
+                </ScrollArea>
+              </CardContent>
+            </Card>
+          }
+          secondary={
+            <Card
+              className={cn(panelClass, "min-w-0 gap-4 py-4")}
               data-testid="scheduled-task-detail"
             >
               {selectedTask ? (
-                <div className="flex flex-col gap-3">
+                <CardContent className="flex flex-col gap-3 px-4 sm:px-5">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="text-lg font-semibold">
-                      {selectedTask.title}
+                    <div className="min-w-0">
+                      <h2 className="text-base font-semibold">
+                        {selectedTask.title}
+                      </h2>
+                      <Badge variant="outline" className="mt-1 font-normal">
+                        {statusLabel(selectedTask.status)}
+                      </Badge>
                     </div>
                     <Button
                       variant="outline"
@@ -431,46 +468,78 @@ export default function ScheduledTasksPage() {
                       {editing ? st.actions.cancelEdit : st.actions.edit}
                     </Button>
                   </div>
-                  <div className="text-muted-foreground text-sm">
-                    {st.detail.contextMode}:{" "}
-                    {contextModeLabel(selectedTask.context_mode)}
-                  </div>
-                  <div className="text-muted-foreground text-sm">
-                    {selectedTask.context_mode === "reuse_thread"
-                      ? `${st.detail.thread}: ${selectedTask.thread_id ?? NONE}`
-                      : `${st.detail.lastThread}: ${selectedTask.last_thread_id ?? NONE}`}
-                  </div>
-                  <div className="text-muted-foreground text-sm">
-                    {st.detail.schedule}:{" "}
-                    {scheduleTypeLabel(selectedTask.schedule_type)}
-                  </div>
-                  <div className="text-muted-foreground text-sm">
-                    {st.detail.nextRun}:{" "}
-                    {formatTimestamp(selectedTask.next_run_at, locale)}
-                  </div>
-                  <div className="text-muted-foreground text-sm">
-                    {st.detail.lastRun}:{" "}
-                    {formatTimestamp(selectedTask.last_run_at, locale)}
-                  </div>
-                  <div className="text-muted-foreground text-sm">
-                    {st.detail.lastRunId}: {selectedTask.last_run_id ?? NONE}
-                  </div>
-                  <div className="text-muted-foreground text-sm">
-                    {st.detail.lastError}: {selectedTask.last_error ?? NONE}
-                  </div>
+                  <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
+                    <div>
+                      <dt className="text-muted-foreground text-xs">
+                        {st.detail.contextMode}
+                      </dt>
+                      <dd>{contextModeLabel(selectedTask.context_mode)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground text-xs">
+                        {st.detail.schedule}
+                      </dt>
+                      <dd>{scheduleTypeLabel(selectedTask.schedule_type)}</dd>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <dt className="text-muted-foreground text-xs">
+                        {selectedTask.context_mode === "reuse_thread"
+                          ? st.detail.thread
+                          : st.detail.lastThread}
+                      </dt>
+                      <dd className="font-mono text-xs break-all">
+                        {selectedTask.context_mode === "reuse_thread"
+                          ? (selectedTask.thread_id ?? NONE)
+                          : (selectedTask.last_thread_id ?? NONE)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground text-xs">
+                        {st.detail.nextRun}
+                      </dt>
+                      <dd className="tabular-nums">
+                        {formatTimestamp(selectedTask.next_run_at, locale)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground text-xs">
+                        {st.detail.lastRun}
+                      </dt>
+                      <dd className="tabular-nums">
+                        {formatTimestamp(selectedTask.last_run_at, locale)}
+                      </dd>
+                    </div>
+                    {selectedTask.last_error ? (
+                      <div className="sm:col-span-2">
+                        <dt className="text-muted-foreground text-xs">
+                          {st.detail.lastError}
+                        </dt>
+                        <dd className="text-destructive text-xs">
+                          {selectedTask.last_error}
+                        </dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                  <Separator />
                   {editing ? (
                     <div className="flex flex-col gap-2 rounded-lg border p-3">
-                      <Input
-                        value={editTitle}
-                        onChange={(event) => setEditTitle(event.target.value)}
-                        placeholder={st.edit.titlePlaceholder}
-                      />
-                      <Textarea
-                        rows={4}
-                        value={editPrompt}
-                        onChange={(event) => setEditPrompt(event.target.value)}
-                        placeholder={st.edit.promptPlaceholder}
-                      />
+                      <FormField label={st.edit.titlePlaceholder}>
+                        <Input
+                          value={editTitle}
+                          onChange={(event) => setEditTitle(event.target.value)}
+                          placeholder={st.edit.titlePlaceholder}
+                        />
+                      </FormField>
+                      <FormField label={st.edit.promptPlaceholder}>
+                        <Textarea
+                          rows={3}
+                          value={editPrompt}
+                          onChange={(event) =>
+                            setEditPrompt(event.target.value)
+                          }
+                          placeholder={st.edit.promptPlaceholder}
+                        />
+                      </FormField>
                       <ScheduledTaskScheduleInput
                         key={selectedTask.id}
                         initial={editSchedule}
@@ -493,7 +562,9 @@ export default function ScheduledTasksPage() {
                       </Button>
                     </div>
                   ) : (
-                    <div className="text-sm">{selectedTask.prompt}</div>
+                    <p className="text-muted-foreground text-sm">
+                      {selectedTask.prompt}
+                    </p>
                   )}
                   <div className="flex flex-wrap gap-2">
                     <Button
@@ -524,7 +595,7 @@ export default function ScheduledTasksPage() {
                       {st.actions.delete}
                     </Button>
                   </div>
-                  <div data-testid="scheduled-task-runs">
+                  <div data-testid="scheduled-task-runs" className="text-sm">
                     {(taskRunsQuery.data ?? []).length === 1
                       ? st.detail.runsCountOne.replace(
                           "{count}",
@@ -535,46 +606,48 @@ export default function ScheduledTasksPage() {
                           String((taskRunsQuery.data ?? []).length),
                         )}
                   </div>
-                  <div
-                    className="flex flex-col gap-2"
-                    data-testid="scheduled-task-run-list"
-                  >
-                    {(taskRunsQuery.data ?? []).length > 0 ? (
-                      (taskRunsQuery.data ?? []).map((run) => (
-                        <div
-                          key={run.id}
-                          className="rounded-md border p-3 text-sm"
-                        >
-                          <div className="font-medium">{runSummary(run)}</div>
-                          <div className="text-muted-foreground text-xs">
-                            {run.run_id ?? NONE}
-                          </div>
-                          <div className="text-muted-foreground text-xs">
-                            {formatTimestamp(run.scheduled_for, locale)}
-                          </div>
-                          {run.error && (
-                            <div className="text-destructive text-xs">
-                              {run.error}
+                  <ScrollArea className="max-h-48">
+                    <div
+                      className="flex flex-col gap-2 pr-3"
+                      data-testid="scheduled-task-run-list"
+                    >
+                      {(taskRunsQuery.data ?? []).length > 0 ? (
+                        (taskRunsQuery.data ?? []).map((run) => (
+                          <div
+                            key={run.id}
+                            className="bg-muted/40 rounded-md border p-2.5 text-sm"
+                          >
+                            <div className="font-medium">{runSummary(run)}</div>
+                            <div className="text-muted-foreground text-xs">
+                              {run.run_id ?? NONE}
                             </div>
-                          )}
+                            <div className="text-muted-foreground text-xs">
+                              {formatTimestamp(run.scheduled_for, locale)}
+                            </div>
+                            {run.error && (
+                              <div className="text-destructive text-xs">
+                                {run.error}
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-muted-foreground text-sm">
+                          {st.detail.noRuns}
                         </div>
-                      ))
-                    ) : (
-                      <div className="text-muted-foreground text-sm">
-                        {st.detail.noRuns}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </CardContent>
               ) : (
-                <div className="text-muted-foreground text-sm">
+                <CardContent className="text-muted-foreground px-4 text-sm sm:px-5">
                   {st.detail.noSelection}
-                </div>
+                </CardContent>
               )}
-            </div>
-          </div>
-        </div>
-      </WorkspaceBody>
+            </Card>
+          }
+        />
+      </Shell>
 
       {/* Delete confirm — follows the agent-card confirm pattern. */}
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
@@ -607,6 +680,6 @@ export default function ScheduledTasksPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </WorkspaceContainer>
+    </>
   );
 }

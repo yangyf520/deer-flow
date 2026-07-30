@@ -62,8 +62,8 @@ export function AppearanceSettingsPage() {
   return (
     <div className="space-y-8">
       <SettingsSection
-        title={t.settings.appearance.themeTitle}
-        description={t.settings.appearance.themeDescription}
+        title={t.settings.appearance.appearanceModeTitle}
+        description={t.settings.appearance.appearanceModeDescription}
       >
         <div className="grid gap-3 lg:grid-cols-3">
           {themeOptions.map((option) => (

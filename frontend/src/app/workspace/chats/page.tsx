@@ -3,7 +3,12 @@
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { Shell, ShellHeader, WorkspaceIndexList } from "@/components/component";
+import {
+  Shell,
+  ShellHeader,
+  WorkspaceIndexList,
+  formatItemListCountLabel,
+} from "@/components/component";
 import { ChatListRow } from "@/components/workspace/chats/chat-list-row";
 import { useI18n } from "@/core/i18n/hooks";
 import { useInfiniteThreads } from "@/core/threads/hooks";
@@ -37,24 +42,16 @@ export default function ChatsPage() {
     );
   }, [threads, search]);
 
-  const countLabel = useMemo(() => {
-    if (isSearching && filteredThreads.length !== threads.length) {
-      return t.chats.countFiltered(filteredThreads.length, threads.length);
-    }
-    if (hasNextPage && !isSearching) {
-      return `${threads.length}+`;
-    }
-    if (!isSearching) {
-      return t.chats.countTotal(filteredThreads.length);
-    }
-    return String(filteredThreads.length);
-  }, [
-    filteredThreads.length,
-    hasNextPage,
-    isSearching,
-    t.chats,
-    threads.length,
-  ]);
+  const countLabel = useMemo(
+    () =>
+      formatItemListCountLabel({
+        shownCount: filteredThreads.length,
+        loadedCount: threads.length,
+        hasNextPage: Boolean(hasNextPage),
+        isFiltering: isSearching,
+      }),
+    [filteredThreads.length, hasNextPage, isSearching, threads.length],
+  );
 
   return (
     <Shell
