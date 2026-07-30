@@ -287,18 +287,13 @@ def test_make_lead_agent_empty_skills_passed_correctly(monkeypatch):
 
     monkeypatch.setattr(lead_agent_module, "apply_prompt_template", mock_apply_prompt_template)
 
-    # Case 1: Empty skills list
-    monkeypatch.setattr(lead_agent_module, "load_agent_config", lambda x: AgentConfig(name="test", skills=[]))
-    lead_agent_module.make_lead_agent({"configurable": {"agent_name": "test"}})
-    assert captured_skills[-1] == set()
-
-    # Case 2: None skills list
-    monkeypatch.setattr(lead_agent_module, "load_agent_config", lambda x: AgentConfig(name="test", skills=None))
+    # Case 1: No scenario → inherit all skills in prompt
+    monkeypatch.setattr(lead_agent_module, "load_agent_config", lambda x: AgentConfig(name="test"))
     lead_agent_module.make_lead_agent({"configurable": {"agent_name": "test"}})
     assert captured_skills[-1] is None
 
-    # Case 3: Some skills list
-    monkeypatch.setattr(lead_agent_module, "load_agent_config", lambda x: AgentConfig(name="test", skills=["skill1"]))
+    # Case 2: Scenario binds one skill
+    monkeypatch.setattr(lead_agent_module, "load_agent_config", lambda x: AgentConfig(name="test", knowledge_scenario="skill1"))
     lead_agent_module.make_lead_agent({"configurable": {"agent_name": "test"}})
     assert captured_skills[-1] == {"skill1"}
 
@@ -313,7 +308,7 @@ def test_make_lead_agent_custom_skill_allowlist_does_not_activate_tool_policy(mo
     monkeypatch.setattr(lead_agent_module, "build_middlewares", lambda *args, **kwargs: [])
     monkeypatch.setattr(lead_agent_module, "apply_prompt_template", lambda **kwargs: "mock_prompt")
     monkeypatch.setattr(lead_agent_module, "create_agent", lambda **kwargs: kwargs)
-    monkeypatch.setattr(lead_agent_module, "load_agent_config", lambda x: AgentConfig(name="test", skills=["restricted", "legacy"]))
+    monkeypatch.setattr(lead_agent_module, "load_agent_config", lambda x: AgentConfig(name="test", knowledge_scenario="restricted"))
     monkeypatch.setattr(lead_agent_module, "_load_enabled_available_skills", lambda available_skills, *, app_config, user_id=None: [_make_skill("restricted", ["read_file", "web_search"]), _make_skill("legacy", None)])
     monkeypatch.setattr("deerflow.tools.get_available_tools", lambda **kwargs: [NamedTool("task"), NamedTool("bash"), NamedTool("read_file"), NamedTool("web_search")])
 
@@ -358,7 +353,7 @@ def test_make_lead_agent_all_legacy_skills_preserve_all_tools(monkeypatch):
     monkeypatch.setattr(lead_agent_module, "build_middlewares", lambda *args, **kwargs: [])
     monkeypatch.setattr(lead_agent_module, "apply_prompt_template", lambda **kwargs: "mock_prompt")
     monkeypatch.setattr(lead_agent_module, "create_agent", lambda **kwargs: kwargs)
-    monkeypatch.setattr(lead_agent_module, "load_agent_config", lambda x: AgentConfig(name="test", skills=None))
+    monkeypatch.setattr(lead_agent_module, "load_agent_config", lambda x: AgentConfig(name="test"))
     monkeypatch.setattr(lead_agent_module, "_load_enabled_available_skills", lambda available_skills, *, app_config, user_id=None: [_make_skill("legacy", None)])
     monkeypatch.setattr("deerflow.tools.get_available_tools", lambda **kwargs: [NamedTool("bash"), NamedTool("read_file")])
 
@@ -406,7 +401,7 @@ def test_make_lead_agent_passive_empty_skill_policy_preserves_mcp_and_other_tool
     monkeypatch.setattr(
         lead_agent_module,
         "load_agent_config",
-        lambda x: AgentConfig(name="test", skills=["example-safe-skill"]),
+        lambda x: AgentConfig(name="test", knowledge_scenario="example-safe-skill"),
     )
     monkeypatch.setattr(
         "deerflow.tools.get_available_tools",
@@ -497,7 +492,7 @@ def test_make_lead_agent_fails_closed_when_skill_policy_load_fails(monkeypatch):
     monkeypatch.setattr(lead_agent_module, "create_chat_model", lambda **kwargs: "model")
     create_agent_mock = MagicMock()
     monkeypatch.setattr(lead_agent_module, "create_agent", create_agent_mock)
-    monkeypatch.setattr(lead_agent_module, "load_agent_config", lambda x: AgentConfig(name="test", skills=["restricted"]))
+    monkeypatch.setattr(lead_agent_module, "load_agent_config", lambda x: AgentConfig(name="test", knowledge_scenario="restricted"))
 
     mock_app_config = MagicMock()
     # make_lead_agent freezes the delta snapshot frequency from the app config;

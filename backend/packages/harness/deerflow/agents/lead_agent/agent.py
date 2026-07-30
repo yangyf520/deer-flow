@@ -435,12 +435,8 @@ def build_middlewares(
 def _available_skill_names(agent_config, is_bootstrap: bool) -> set[str] | None:
     if is_bootstrap:
         return set(_BOOTSTRAP_SKILL_NAMES)
-    if agent_config:
-        from deerflow.config.agents_config import skills_for_agent
-
-        skills = skills_for_agent(agent_config)
-        if skills is not None:
-            return set(skills)
+    if agent_config and agent_config.skills is not None:
+        return set(agent_config.skills)
     return None
 
 
@@ -497,7 +493,7 @@ def _make_lead_agent(config: RunnableConfig, *, app_config: AppConfig):
     non_interactive = bool(cfg.get("non_interactive", False))
     agent_name = validate_agent_name(cfg.get("agent_name"))
 
-    agent_config = load_agent_config(agent_name) if not is_bootstrap else None
+    agent_config = load_agent_config(agent_name, user_id=resolved_user_id) if not is_bootstrap else None
     available_skills = _available_skill_names(agent_config, is_bootstrap)
     # Custom agent model from agent config (if any), or None to let _resolve_model_name pick the default
     agent_model_name = agent_config.model if agent_config and agent_config.model else None
@@ -538,9 +534,7 @@ def _make_lead_agent(config: RunnableConfig, *, app_config: AppConfig):
     if "metadata" not in config:
         config["metadata"] = {}
 
-    from deerflow.config.agents_config import tool_groups_for_agent
-
-    agent_tool_groups = tool_groups_for_agent(agent_config) if agent_config else None
+    agent_tool_groups = agent_config.tool_groups if agent_config else None
     config["metadata"].update(
         {
             "agent_name": agent_name or "default",
