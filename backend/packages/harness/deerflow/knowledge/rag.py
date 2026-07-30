@@ -6,6 +6,7 @@ business filters (lanes, temporal), not hand-rolled RAG algorithms.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -408,53 +409,21 @@ def _release_matches(meta: dict[str, Any], want: str) -> bool:
     return have == want_v
 
 
-def list_document_chunks(*, space_id: str, doc_id: str) -> list[dict[str, Any]]:
-    """List ingest leaf chunks for a document (from space docstore; VectorStore has embeddings)."""
-    from llama_index.core.node_parser import get_leaf_nodes
-
-    docstore = load_docstore(space_id)
-    candidates: list[Any] = []
-    for node in list(getattr(docstore, "docs", {}).values()):
-        meta = dict(getattr(node, "metadata", None) or {})
-        if meta.get("doc_id") != doc_id:
-            continue
-        candidates.append(node)
-    if not candidates:
-        return []
-
+def _chunk_sort_key(meta: dict[str, Any], *, node_id: str = "") -> tuple:
+    start = meta.get("start_char_idx")
     try:
-        leaves = list(get_leaf_nodes(candidates) or []) or candidates
-    except Exception:
-        leaves = candidates
+        start_i = int(start) if start is not None else 10**12
+    except (TypeError, ValueError):
+        start_i = 10**12
+    page = meta.get("page") or meta.get("page_label")
+    try:
+        page_i = int(page) if page is not None else 10**9
+    except (TypeError, ValueError):
+        page_i = 10**9
+    return (page_i, start_i, node_id)
 
-    # Deduplicate by node_id while preserving order
-    seen: set[str] = set()
-    ordered: list[Any] = []
-    for node in leaves:
-        nid = str(getattr(node, "node_id", None) or getattr(node, "id_", None) or id(node))
-        if nid in seen:
-            continue
-        seen.add(nid)
-        ordered.append(node)
 
-    def _sort_key(node: Any) -> tuple:
-        meta = dict(getattr(node, "metadata", None) or {})
-        start = meta.get("start_char_idx")
-        if start is None:
-            start = getattr(node, "start_char_idx", None)
-        try:
-            start_i = int(start) if start is not None else 10**12
-        except (TypeError, ValueError):
-            start_i = 10**12
-        page = meta.get("page") or meta.get("page_label")
-        try:
-            page_i = int(page) if page is not None else 10**9
-        except (TypeError, ValueError):
-            page_i = 10**9
-        return (page_i, start_i, str(getattr(node, "node_id", "") or ""))
-
-    ordered.sort(key=_sort_key)
-
+def _chunk_items_from_nodes(ordered: list[Any]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for i, node in enumerate(ordered, start=1):
         meta = dict(getattr(node, "metadata", None) or {})
@@ -474,15 +443,174 @@ def list_document_chunks(*, space_id: str, doc_id: str) -> list[dict[str, Any]]:
     return items
 
 
+def _chunk_text_from_store_metadata(meta: dict[str, Any]) -> str:
+    raw = meta.get("text") or meta.get("document_text")
+    if raw:
+        return str(raw).strip()
+    node_content = meta.get("_node_content")
+    if not node_content:
+        return ""
+    try:
+        payload = json.loads(node_content) if isinstance(node_content, str) else node_content
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    text = payload.get("text") or payload.get("content")
+    if text:
+        return str(text).strip()
+    nested = payload.get("metadata")
+    if isinstance(nested, dict) and nested.get("text"):
+        return str(nested["text"]).strip()
+    return ""
+
+
+def _pg_row_metadata(row: Any) -> dict[str, Any]:
+    raw = getattr(row, "metadata_", None) or getattr(row, "metadata", None) or {}
+    return dict(raw or {})
+
+
+def _chunk_text_from_pg_row(row: Any, meta: dict[str, Any]) -> str:
+    text = str(getattr(row, "text", None) or "").strip()
+    if text:
+        return text
+    return _chunk_text_from_store_metadata(meta)
+
+
+def _pgvector_doc_id_filter(table: Any, doc_id: str) -> Any:
+    from sqlalchemy import or_
+
+    return or_(
+        table.metadata_["ref_doc_id"].astext == doc_id,
+        table.metadata_["doc_id"].astext == doc_id,
+        table.metadata_["document_id"].astext == doc_id,
+        table.metadata_["_node_content"].astext.contains(f'"doc_id": "{doc_id}"'),
+    )
+
+
+def _list_document_chunks_from_pgvector(*, space_id: str, doc_id: str) -> list[dict[str, Any]]:
+    """Fallback when local docstore is empty but pgvector rows exist (common after redeploy)."""
+    try:
+        from sqlalchemy import select
+    except ImportError:
+        return []
+    try:
+        vector_store = get_vector_store(space_id)
+    except Exception as exc:
+        logger.debug("vector store unavailable for chunk list doc=%s: %s", doc_id, exc)
+        return []
+    if type(vector_store).__name__ != "PGVectorStore":
+        return []
+    if not hasattr(vector_store, "_initialize"):
+        return []
+    vector_store._initialize()
+    if not hasattr(vector_store, "_session"):
+        logger.warning("pgvector chunk fallback doc=%s: store has no _session after init", doc_id)
+        return []
+    table = getattr(vector_store, "_table_class", None)
+    if table is None:
+        return []
+
+    with vector_store._session() as session:
+        rows = list(session.scalars(select(table).where(_pgvector_doc_id_filter(table, doc_id))).all())
+
+    if rows:
+        logger.debug("pgvector chunk fallback doc=%s rows=%s", doc_id, len(rows))
+
+    candidates: list[tuple[str, dict[str, Any], str]] = []
+    for row in rows:
+        meta = _pg_row_metadata(row)
+        text = _chunk_text_from_pg_row(row, meta)
+        if not text:
+            continue
+        node_id = str(getattr(row, "node_id", None) or getattr(row, "id", None) or meta.get("node_id") or meta.get("id") or "")
+        candidates.append((node_id, meta, text))
+
+    if rows and not candidates:
+        logger.warning(
+            "pgvector chunk fallback doc=%s: %s rows but no extractable text (check text column)",
+            doc_id,
+            len(rows),
+        )
+
+    candidates.sort(key=lambda item: _chunk_sort_key(item[1], node_id=item[0]))
+
+    items: list[dict[str, Any]] = []
+    for i, (node_id, meta, text) in enumerate(candidates, start=1):
+        items.append(
+            {
+                "id": node_id or f"chunk-{i}",
+                "index": i,
+                "text": text,
+                "char_count": len(text),
+                "block": meta.get("block") or annotate_block_type(text),
+                "heading_path": meta.get("heading_path") or meta.get("section") or None,
+                "page": meta.get("page") or meta.get("page_label") or None,
+                "parse_quality": meta.get("parse_quality"),
+            }
+        )
+    return items
+
+
+def list_document_chunks(*, space_id: str, doc_id: str) -> list[dict[str, Any]]:
+    """List ingest leaf chunks (docstore first, pgvector fallback)."""
+    from llama_index.core.node_parser import get_leaf_nodes
+
+    docstore = load_docstore(space_id)
+    candidates: list[Any] = []
+    for node in list(getattr(docstore, "docs", {}).values()):
+        meta = dict(getattr(node, "metadata", None) or {})
+        if meta.get("doc_id") != doc_id:
+            continue
+        candidates.append(node)
+    if not candidates:
+        return _list_document_chunks_from_pgvector(space_id=space_id, doc_id=doc_id)
+
+    try:
+        leaves = list(get_leaf_nodes(candidates) or []) or candidates
+    except Exception:
+        leaves = candidates
+
+    # Deduplicate by node_id while preserving order
+    seen: set[str] = set()
+    ordered: list[Any] = []
+    for node in leaves:
+        nid = str(getattr(node, "node_id", None) or getattr(node, "id_", None) or id(node))
+        if nid in seen:
+            continue
+        seen.add(nid)
+        ordered.append(node)
+
+    ordered.sort(
+        key=lambda node: _chunk_sort_key(
+            _node_chunk_meta(node),
+            node_id=str(getattr(node, "node_id", None) or getattr(node, "id_", None) or ""),
+        )
+    )
+    items = _chunk_items_from_nodes(ordered)
+    if any(str(item.get("text") or "").strip() for item in items):
+        return items
+    return _list_document_chunks_from_pgvector(space_id=space_id, doc_id=doc_id)
+
+
+def _node_chunk_meta(node: Any) -> dict[str, Any]:
+    meta = dict(getattr(node, "metadata", None) or {})
+    if meta.get("start_char_idx") is None and getattr(node, "start_char_idx", None) is not None:
+        meta["start_char_idx"] = getattr(node, "start_char_idx")
+    return meta
+
+
 def _delete_pgvector_rows_for_doc(vector_store, *, doc_id: str) -> int:
     """Delete pgvector rows tied to a knowledge doc_id (ref_doc_id or metadata.doc_id)."""
     try:
         from sqlalchemy import delete, or_
     except ImportError:
         return 0
-    if not hasattr(vector_store, "_initialize") or not hasattr(vector_store, "_session"):
+    if not hasattr(vector_store, "_initialize"):
         return 0
     vector_store._initialize()
+    if not hasattr(vector_store, "_session"):
+        return 0
     table = getattr(vector_store, "_table_class", None)
     if table is None:
         return 0
@@ -568,9 +696,11 @@ def _delete_pgvector_rows_for_space(vector_store, *, space_id: str) -> int:
         from sqlalchemy import String, cast, delete, or_
     except ImportError:
         return 0
-    if not hasattr(vector_store, "_initialize") or not hasattr(vector_store, "_session"):
+    if not hasattr(vector_store, "_initialize"):
         return 0
     vector_store._initialize()
+    if not hasattr(vector_store, "_session"):
+        return 0
     table = getattr(vector_store, "_table_class", None)
     if table is None:
         return 0

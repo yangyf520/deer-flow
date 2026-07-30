@@ -61,6 +61,45 @@ def test_pg_params_use_discrete_fields_when_no_url():
     }
 
 
+def test_chunk_text_from_store_metadata():
+    from deerflow.knowledge import rag
+
+    assert rag._chunk_text_from_store_metadata({"text": "beef chunk"}) == "beef chunk"
+    assert rag._chunk_text_from_store_metadata({"_node_content": '{"text":"serialized chunk"}'}) == "serialized chunk"
+
+
+def test_chunk_text_from_pg_row_prefers_text_column():
+    from deerflow.knowledge import rag
+
+    row = SimpleNamespace(text="牛肉分块", metadata_={"doc_id": "d1"})
+    assert rag._chunk_text_from_pg_row(row, rag._pg_row_metadata(row)) == "牛肉分块"
+
+
+def test_list_document_chunks_pgvector_fallback():
+    from deerflow.knowledge import rag
+
+    with (
+        patch("deerflow.knowledge.rag.load_docstore") as load_ds,
+        patch("deerflow.knowledge.rag._list_document_chunks_from_pgvector") as pg,
+    ):
+        load_ds.return_value = SimpleNamespace(docs={})
+        pg.return_value = [
+            {
+                "id": "c1",
+                "index": 1,
+                "text": "beef",
+                "char_count": 4,
+                "block": "text",
+                "heading_path": None,
+                "page": None,
+                "parse_quality": None,
+            }
+        ]
+        items = rag.list_document_chunks(space_id="space-1", doc_id="doc-1")
+        pg.assert_called_once_with(space_id="space-1", doc_id="doc-1")
+        assert items[0]["text"] == "beef"
+
+
 def test_app_config_loads_knowledge_vector_store(tmp_path):
     """AppConfig.from_file must apply knowledge.vector_store (not leave chroma default)."""
     from deerflow.config.app_config import AppConfig
