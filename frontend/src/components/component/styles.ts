@@ -24,7 +24,7 @@ export const workspaceGlassHeaderClass =
   "sticky top-0 z-10 shrink-0 border-b border-border/40 bg-background/85 backdrop-blur-md supports-[backdrop-filter]:bg-background/70";
 
 export const workspaceHeaderAccentClass =
-  "bg-primary h-5 w-0.5 rounded-full sm:h-6";
+  "bg-primary h-5 w-0.5 shrink-0 rounded-full sm:h-6";
 
 export const workspacePageHeaderStripClass =
   "min-h-8 py-1 sm:min-h-9 sm:py-1.5";
@@ -49,8 +49,13 @@ export const panelInteractiveClass = cn(
   "hover:border-border/70",
 );
 
+export const panelClass = "workspace-panel border-0 bg-transparent shadow-none";
+
 export const headerButtonClass =
   "h-7 min-h-7 shrink-0 gap-1 rounded-md border-border/70 bg-transparent px-2.5 text-xs leading-none shadow-none hover:bg-muted/40 sm:px-3";
+
+export const dialogInlineButtonClass =
+  "h-8 min-h-8 shrink-0 gap-1 rounded-md border-border/70 bg-transparent px-2.5 text-xs leading-none shadow-xs hover:bg-muted/40";
 
 export const headerCreateEmphasisButtonClass =
   "!border-primary !bg-primary !text-primary-foreground shadow-xs hover:!bg-primary/90 hover:!text-primary-foreground";
@@ -123,20 +128,16 @@ export const selectTriggerWrapClass = cn(
 const itemCardIconShellClass =
   "flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-muted/40 text-muted-foreground";
 
+const itemCardIconPrimaryClass = cn(
+  itemCardIconShellClass,
+  "border-primary/35 bg-primary/10 text-primary",
+);
+
 export const itemCardIconToneClass = {
   neutral: itemCardIconShellClass,
-  knowledge: cn(
-    itemCardIconShellClass,
-    "border-sky-500/35 bg-sky-500/10 text-sky-800 dark:text-sky-200",
-  ),
-  api: cn(
-    itemCardIconShellClass,
-    "border-violet-500/35 bg-violet-500/10 text-violet-800 dark:text-violet-200",
-  ),
-  agent: cn(
-    itemCardIconShellClass,
-    "border-primary/35 bg-primary/10 text-primary",
-  ),
+  knowledge: itemCardIconPrimaryClass,
+  api: itemCardIconPrimaryClass,
+  agent: itemCardIconPrimaryClass,
 } as const;
 
 export const itemCardIconClass = "size-4";

@@ -15,7 +15,7 @@ import { useI18n } from "@/core/i18n/hooks";
 import { env } from "@/env";
 import { cn } from "@/lib/utils";
 
-export function WorkspaceHeader({ className }: { className?: string }) {
+export function SidebarHead({ className }: { className?: string }) {
   const { t } = useI18n();
   const { state } = useSidebar();
   const pathname = usePathname();

@@ -1,7 +1,11 @@
 "use client";
 
+import { ArrowLeftIcon } from "lucide-react";
+import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { Button } from "@/components/ui/button";
+import { useI18n } from "@/core/i18n/hooks";
 import { cn } from "@/lib/utils";
 
 import {
@@ -77,22 +81,27 @@ export function Shell({
 }
 
 export function ShellHeader({
+  backHref,
   title,
   description,
+  descriptionSuffix,
   stat,
   actions,
   toolbar,
   toolbarClassName,
   className,
 }: {
+  backHref?: string;
   title: string;
   description?: string;
+  descriptionSuffix?: ReactNode;
   stat?: string;
   actions?: ReactNode;
   toolbar?: ReactNode;
   toolbarClassName?: string;
   className?: string;
 }) {
+  const { t } = useI18n();
   const showTools = Boolean(toolbar ?? actions);
 
   return (
@@ -106,7 +115,21 @@ export function ShellHeader({
       <div className={cn("flex flex-col gap-1", workspacePageHeaderStripClass)}>
         <div className="flex min-w-0 items-center justify-between gap-2 sm:gap-3">
           <div className="flex min-w-0 flex-1 items-center gap-2">
-            <div className={workspaceHeaderAccentClass} aria-hidden />
+            {backHref ? (
+              <Button
+                asChild
+                size="icon-sm"
+                variant="ghost"
+                className="text-muted-foreground hover:text-foreground -ml-1 shrink-0"
+              >
+                <Link href={backHref}>
+                  <ArrowLeftIcon className="size-4" />
+                  <span className="sr-only">{t.common.back}</span>
+                </Link>
+              </Button>
+            ) : (
+              <div className={workspaceHeaderAccentClass} aria-hidden />
+            )}
             <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
               <h1 className="shrink-0 text-base font-semibold tracking-tight sm:text-lg">
                 {title}
@@ -116,10 +139,23 @@ export function ShellHeader({
                   {stat}
                 </span>
               ) : null}
-              {description ? (
-                <p className="text-muted-foreground hidden max-w-xl min-w-0 truncate text-xs leading-snug sm:inline">
-                  {description}
-                </p>
+              {description || descriptionSuffix ? (
+                <div className="text-muted-foreground hidden max-w-xl min-w-0 items-center gap-2 text-xs leading-snug sm:flex">
+                  {description ? (
+                    <p className="min-w-0 truncate">{description}</p>
+                  ) : null}
+                  {description && descriptionSuffix ? (
+                    <span
+                      className="bg-border/70 h-3 w-px shrink-0"
+                      aria-hidden
+                    />
+                  ) : null}
+                  {descriptionSuffix ? (
+                    <div className="min-w-0 shrink truncate">
+                      {descriptionSuffix}
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           </div>

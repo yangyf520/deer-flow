@@ -84,6 +84,8 @@ import { MyListRow } from "@/components/workspace/my-feature/my-list-row";
 
 Helper: `formatItemListCountLabel({ shownCount, loadedCount, hasNextPage, isFiltering })` for common count patterns.
 
+**Card grid helpers:** `ItemCard` / `ItemCardIcon` for agents, API keys, and knowledge indexes; `ResourceRow` / `ResourceList` for settings-style split lists (e.g. scheduled tasks).
+
 ## Card index (grid)
 
 Use **`ItemGrid`**, **`ItemCard`**, **`ItemCardIcon`**, **`ItemCardBadge`**, **`itemMetaTags`**, **`CardAction`** from `item.tsx`. Same `Shell` + `ShellHeader`; body is a grid instead of `WorkspaceIndexList`.

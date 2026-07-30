@@ -66,8 +66,14 @@ export { Shell, ShellHeader, SplitView } from "./shell";
 export { Tooltip } from "./tooltip";
 
 export { AlertError } from "./alert";
+export {
+  dialogInlineButtonClass,
+  headerButtonClass,
+  workspacePageInsetXClass,
+} from "./styles";
 export { InlineEmpty, ListEmpty, PageEmptyState, PanelEmpty } from "./empty";
 export { FormField } from "./form-field";
 export { Search } from "./search";
+export { ResourceList, ResourceRow } from "./resource-row";
 export { Section } from "./section";
 export { Toggle, type ToggleProps, type ToggleOption } from "./toggle";

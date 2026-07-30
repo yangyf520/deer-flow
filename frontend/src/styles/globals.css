@@ -312,6 +312,19 @@
     @apply bg-background text-foreground;
   }
 
+  /* Chrome autofill paints a light fill that breaks dark inputs */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  textarea:-webkit-autofill,
+  textarea:-webkit-autofill:hover,
+  textarea:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--foreground);
+    caret-color: var(--foreground);
+    box-shadow: 0 0 0 1000px transparent inset;
+    transition: background-color 99999s ease-out;
+  }
+
   .container-md {
     width: 100%;
     @media (width >= 40rem) {
@@ -428,6 +441,53 @@
   .katex-display::-webkit-scrollbar-thumb {
     background: color-mix(in oklch, var(--muted-foreground) 35%, transparent);
     border-radius: 999px;
+  }
+
+  /* Apple-inspired workspace (/workspace routes) — CTAs use global neutral primary */
+  .workspace-shell {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .workspace-shell::before {
+    content: none;
+  }
+
+  .dark .workspace-shell::before {
+    content: none;
+  }
+
+  .workspace-shell > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .workspace-panel {
+    overflow: hidden;
+    border-radius: calc(var(--radius) + 4px);
+    border: 1px solid color-mix(in oklch, var(--border) 65%, transparent);
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .dark .workspace-panel {
+    border-color: oklch(1 0 0 / 10%);
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .workspace-agent-icon {
+    display: flex;
+    width: 2rem;
+    height: 2rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: calc(var(--radius) + 2px);
+    border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+    background: transparent;
+    color: var(--foreground);
+    box-shadow: none;
   }
 }
 

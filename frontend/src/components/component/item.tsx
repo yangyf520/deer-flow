@@ -211,6 +211,7 @@ export function ItemCard({
   description,
   badges,
   metaTags,
+  metaTagsLayout = "inline",
   actions,
   className,
 }: {
@@ -221,6 +222,7 @@ export function ItemCard({
   description?: ReactNode;
   badges?: ReactNode;
   metaTags?: ReactNode[];
+  metaTagsLayout?: "inline" | "stacked";
   actions?: ReactNode;
   className?: string;
 }) {
@@ -232,23 +234,47 @@ export function ItemCard({
         <ItemCardIcon icon={icon} tone={iconTone} />
         <div className="min-w-0 space-y-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-            <h3 className="min-w-0 flex-1 truncate text-base font-semibold tracking-tight">
+            <h3 className="min-w-0 flex-1 truncate text-xs leading-snug font-semibold tracking-tight">
               {title}
             </h3>
             {badges}
           </div>
           {description ? (
-            <p className="text-muted-foreground line-clamp-2 text-xs leading-relaxed">
-              {description}
-            </p>
+            typeof description === "string" ? (
+              <Tooltip
+                content={description}
+                contentClassName="max-w-[16rem] px-2 py-1 text-[11px] leading-snug whitespace-normal break-words [text-wrap:wrap]"
+              >
+                <p className="text-muted-foreground truncate text-xs leading-relaxed">
+                  {description}
+                </p>
+              </Tooltip>
+            ) : (
+              <p className="text-muted-foreground truncate text-xs leading-relaxed">
+                {description}
+              </p>
+            )
           ) : null}
         </div>
       </div>
       {hasMetaTags ? (
         <div className="mt-auto flex flex-col gap-2 pt-2">
-          <ul className="flex min-h-[1.625rem] flex-wrap gap-1.5">
+          <ul
+            className={cn(
+              "flex gap-1.5",
+              metaTagsLayout === "stacked"
+                ? "flex-col"
+                : "min-h-[1.625rem] flex-wrap",
+            )}
+          >
             {metaTags!.map((item, i) => (
-              <li key={i} className="max-w-full">
+              <li
+                key={i}
+                className={cn(
+                  "max-w-full",
+                  metaTagsLayout === "stacked" && "w-full min-w-0",
+                )}
+              >
                 {item}
               </li>
             ))}
@@ -278,7 +304,7 @@ export function ItemCard({
       )}
       {actions ? (
         <div
-          className="border-border/40 bg-muted/10 dark:bg-muted/20 flex flex-wrap items-stretch gap-1.5 border-t px-2 py-2"
+          className="border-border/40 bg-muted/10 dark:bg-muted/20 flex min-w-0 flex-nowrap items-stretch gap-1.5 border-t px-2 py-2"
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
