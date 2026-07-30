@@ -164,6 +164,8 @@ database:
   sqlite_dir: .deer-flow/data
   pool_recycle: 300
   command_timeout: 30
+agent_storage:
+  backend: db
 knowledge:
   enabled: true
   parse:
