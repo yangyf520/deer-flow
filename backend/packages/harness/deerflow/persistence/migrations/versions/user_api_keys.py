@@ -1,7 +1,7 @@
 """Create user_api_keys table for per-user programmatic access tokens.
 
 Revision ID: user_api_keys
-Revises: 0005_run_stop_reason, agents
+Revises: 0005_run_stop_reason, knowledge_grants
 Create Date: 2026-07-22
 """
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "user_api_keys"
-down_revision: str | Sequence[str] | None = ("0005_run_stop_reason", "agents")
+down_revision: str | Sequence[str] | None = ("0005_run_stop_reason", "knowledge_grants")
 branch_labels = None
 depends_on = None
 
