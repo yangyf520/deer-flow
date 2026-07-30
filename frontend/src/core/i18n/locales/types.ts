@@ -365,21 +365,23 @@ export interface Translations {
     soulGenerating: string;
     soulGenerateError: string;
     soulGenerated: string;
+    sectionCapability: string;
     knowledgeTitle: string;
     knowledgeBoundCount: string;
     knowledgeHint: string;
     knowledgeEmptyHint: string;
+    knowledgeMetaNone: string;
     openKnowledge: string;
     mountAllOpen: string;
     unmountAllOpen: string;
-    createAgent: string;
-    createSuccess: string;
-    fieldModel: string;
     fieldKnowledgeScenario: string;
     knowledgeScenarioHint: string;
     knowledgeScenarioEmpty: string;
-    modelInherit: string;
     scenarioInherit: string;
+    createAgent: string;
+    createSuccess: string;
+    fieldModel: string;
+    modelInherit: string;
   };
 
   // Knowledge

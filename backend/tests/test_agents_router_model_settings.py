@@ -144,3 +144,31 @@ async def test_update_rejects_unknown_model(_agent_env) -> None:
     with pytest.raises(HTTPException) as excinfo:
         await update_agent("researcher", AgentUpdateRequest(model="ghost-model"))
     assert excinfo.value.status_code == 422
+
+
+async def test_create_and_update_persist_knowledge_bindings(_agent_env) -> None:
+    resp = await create_agent_endpoint(
+        AgentCreateRequest(
+            name="kb-agent",
+            soul="You know things.",
+            knowledge_spaces=["space-a", "space-b"],
+            knowledge_scenario="policy-review",
+        )
+    )
+    assert resp.knowledge_spaces == ["space-a", "space-b"]
+    assert resp.knowledge_scenario == "policy-review"
+
+    fetched = await get_agent("kb-agent")
+    assert fetched.knowledge_spaces == ["space-a", "space-b"]
+    assert fetched.knowledge_scenario == "policy-review"
+
+    updated = await update_agent(
+        "kb-agent",
+        AgentUpdateRequest(knowledge_spaces=["space-c"], knowledge_scenario=None),
+    )
+    assert updated.knowledge_spaces == ["space-c"]
+    assert updated.knowledge_scenario is None
+
+    cleared = await get_agent("kb-agent")
+    assert cleared.knowledge_spaces == ["space-c"]
+    assert cleared.knowledge_scenario is None

@@ -47,6 +47,11 @@ class AgentResponse(BaseModel):
     thinking_enabled: bool | None = Field(default=None, description="Per-agent thinking-mode default (None = runtime default)")
     reasoning_effort: ReasoningEffort | None = Field(default=None, description="Per-agent reasoning-effort default (None = runtime default)")
     soul: str | None = Field(default=None, description="SOUL.md content")
+    knowledge_spaces: list[str] | None = Field(
+        default=None,
+        description="Bound knowledge space ids (None=unset, []=unbound)",
+    )
+    knowledge_scenario: str | None = Field(default=None, description="Default retrieval scenario type")
 
 
 class AgentsListResponse(BaseModel):
@@ -67,6 +72,8 @@ class AgentCreateRequest(BaseModel):
     thinking_enabled: bool | None = Field(default=None, description="Per-agent thinking-mode default (None = runtime default)")
     reasoning_effort: ReasoningEffort | None = Field(default=None, description="Per-agent reasoning-effort default (None = runtime default)")
     soul: str = Field(default="", description="SOUL.md content — agent personality and behavioral guardrails")
+    knowledge_spaces: list[str] | None = Field(default=None, description="Bound knowledge space ids")
+    knowledge_scenario: str | None = Field(default=None, description="Default retrieval scenario type")
 
 
 class AgentUpdateRequest(BaseModel):
@@ -80,6 +87,8 @@ class AgentUpdateRequest(BaseModel):
     thinking_enabled: bool | None = Field(default=None, description="Updated per-agent thinking-mode default")
     reasoning_effort: ReasoningEffort | None = Field(default=None, description="Updated per-agent reasoning-effort default")
     soul: str | None = Field(default=None, description="Updated SOUL.md content")
+    knowledge_spaces: list[str] | None = Field(default=None, description="Bound knowledge space ids")
+    knowledge_scenario: str | None = Field(default=None, description="Default retrieval scenario type")
 
 
 def _validate_agent_name(name: str) -> None:
@@ -193,6 +202,8 @@ def _agent_config_to_response(agent_cfg: AgentConfig, include_soul: bool = False
         thinking_enabled=agent_cfg.thinking_enabled,
         reasoning_effort=agent_cfg.reasoning_effort,
         soul=soul,
+        knowledge_spaces=agent_cfg.knowledge_spaces,
+        knowledge_scenario=agent_cfg.knowledge_scenario,
     )
 
 
@@ -325,6 +336,10 @@ async def create_agent_endpoint(request: AgentCreateRequest) -> AgentResponse:
         config_data["tool_groups"] = request.tool_groups
     if request.skills is not None:
         config_data["skills"] = request.skills
+    if request.knowledge_spaces is not None:
+        config_data["knowledge_spaces"] = request.knowledge_spaces
+    if request.knowledge_scenario is not None:
+        config_data["knowledge_scenario"] = request.knowledge_scenario
     # model / model_settings / thinking_enabled / reasoning_effort (issue #4336).
     _apply_model_behavior(config_data, request)
 
@@ -405,7 +420,7 @@ async def update_agent(name: str, request: AgentUpdateRequest) -> AgentResponse:
         # Use model_fields_set to distinguish "field omitted" from "explicitly set to null".
         # This is critical for skills where None means "inherit all" (not "don't change").
         fields_set = request.model_fields_set
-        config_changed = bool(fields_set & ({"description", "tool_groups", "skills"} | set(_MODEL_BEHAVIOR_FIELDS)))
+        config_changed = bool(fields_set & ({"description", "tool_groups", "skills", "knowledge_spaces", "knowledge_scenario"} | set(_MODEL_BEHAVIOR_FIELDS)))
 
         updated: dict | None = None
         if config_changed:
@@ -425,6 +440,20 @@ async def update_agent(name: str, request: AgentUpdateRequest) -> AgentResponse:
                 new_skills = agent_cfg.skills
             if new_skills is not None:
                 updated["skills"] = new_skills
+
+            if "knowledge_spaces" in fields_set:
+                new_spaces = request.knowledge_spaces
+            else:
+                new_spaces = agent_cfg.knowledge_spaces
+            if new_spaces is not None:
+                updated["knowledge_spaces"] = new_spaces
+
+            if "knowledge_scenario" in fields_set:
+                new_scenario = request.knowledge_scenario
+            else:
+                new_scenario = agent_cfg.knowledge_scenario
+            if new_scenario is not None:
+                updated["knowledge_scenario"] = new_scenario
 
             # model / model_settings / thinking_enabled / reasoning_effort:
             # take explicitly-set request fields, else preserve the existing

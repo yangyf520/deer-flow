@@ -15,6 +15,11 @@ export interface Agent {
   thinking_enabled?: boolean | null;
   reasoning_effort?: ReasoningEffort | null;
   soul?: string | null;
+  knowledge_spaces?: string[] | null;
+  knowledge_scenario?: string | null;
+  user_id?: string | null;
+  created_at?: string | null;
+  created_by?: string | null;
 }
 
 export interface CreateAgentRequest {
@@ -27,6 +32,8 @@ export interface CreateAgentRequest {
   thinking_enabled?: boolean | null;
   reasoning_effort?: ReasoningEffort | null;
   soul?: string;
+  knowledge_spaces?: string[] | null;
+  knowledge_scenario?: string | null;
 }
 
 export interface UpdateAgentRequest {
@@ -38,4 +45,6 @@ export interface UpdateAgentRequest {
   thinking_enabled?: boolean | null;
   reasoning_effort?: ReasoningEffort | null;
   soul?: string | null;
+  knowledge_spaces?: string[] | null;
+  knowledge_scenario?: string | null;
 }
