@@ -1,6 +1,6 @@
 # 制度预审设计（Policy Review）
 
-> 制度预审唯一设计文档，供架构评审与开发参照。正文描述当前目标设计；与业界差距见 [§8](#8-与业界差距)。知识入库与检索底座见 [`knowledge-design.md`](./knowledge-design.md)。
+> 制度预审唯一设计文档，供架构评审与开发参照。正文描述当前目标设计；与业界差距见 [§8](#8-与业界差距)。知识入库与检索底座见 [`knowledge-design.md`](./knowledge-design.md)。规则管理见 [`policy-rule-web-design.md`](./policy-rule-web-design.md)；文档解析见 [`doc-parse-design.md`](./doc-parse-design.md)。
 
 ---
 
@@ -503,6 +503,8 @@ SOUL 无需增加 JSON 字段表，只需保持机器预审与不替代法务终
 ## 相关文档
 
 - [`knowledge-design.md`](./knowledge-design.md) — 知识空间、ACL、检索、Agent 绑库
+- [`policy-rule-web-design.md`](./policy-rule-web-design.md) — 规则管理（法务 Web）
+- [`doc-parse-design.md`](./doc-parse-design.md) — 文档解析（DeerFlow）
 - [`AUTH_DESIGN.md`](../../backend/docs/AUTH_DESIGN.md) — 全局鉴权
 - `skills/public/policy-review/SKILL.md` — Agent 运行时 SOP
 - `config.example.yaml` — 工具与 `policy-review` scenario 样例

@@ -187,7 +187,7 @@ Agent 绑库（二选一或并存）
     → Evidence
 ```
 
-制度预审（Agent Skill + 工具，无专用 `/run` API）见 [`policy-review-design.md`](./policy-review-design.md)。
+制度预审（Agent Skill + 工具，无专用 `/run` API）见 [`policy-review-design.md`](./policy-review-design.md)。规则管理见 [`policy-rule-web-design.md`](./policy-rule-web-design.md)（Web）；文档解析见 [`doc-parse-design.md`](./doc-parse-design.md)（DeerFlow）。
 
 ---
 
@@ -348,5 +348,7 @@ frontend/src/components/workspace/
 ## 相关文档
 
 - [`policy-review-design.md`](./policy-review-design.md) — 制度预审场景
+- [`policy-rule-web-design.md`](./policy-rule-web-design.md) — 规则管理（法务 Web）
+- [`doc-parse-design.md`](./doc-parse-design.md) — 文档解析（DeerFlow）
 - [`AUTH_DESIGN.md`](../../backend/docs/AUTH_DESIGN.md) — 全局鉴权
 - `config.example.yaml` — 配置样例
