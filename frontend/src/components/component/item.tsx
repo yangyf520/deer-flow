@@ -288,7 +288,7 @@ export function ItemCard({
     <article
       className={cn(
         panelInteractiveClass,
-        "group/card flex min-h-[8.5rem] flex-col",
+        "group/card flex min-h-[8.5rem] w-full flex-col",
         className,
       )}
     >
@@ -326,8 +326,9 @@ const colsClass: Record<ItemGridCols, string> = {
   4: "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
 };
 
+/** Collapse empty tracks so a few cards grow to fill the row (auto-fit), not fixed N cols. */
 const denseGridClass =
-  "grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6";
+  "grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))]";
 
 export const itemGridClass = colsClass[DEFAULT_ITEM_GRID_COLS];
 
@@ -345,7 +346,7 @@ export function ItemGrid({
   return (
     <div
       className={cn(
-        "grid",
+        "grid w-full min-w-0",
         density === "dense"
           ? cn("gap-2", denseGridClass)
           : cn("gap-3", colsClass[cols]),
