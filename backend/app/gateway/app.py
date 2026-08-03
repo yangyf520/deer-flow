@@ -20,6 +20,7 @@ from app.gateway.routers import (
     channel_connections,
     channels,
     console,
+    doc,
     features,
     feedback,
     github_webhooks,
@@ -485,6 +486,9 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
 
     # Knowledge API is mounted at /api/knowledge/v1
     app.include_router(knowledge.router)
+
+    # Document parse API is mounted at /api/doc/parse
+    app.include_router(doc.router)
 
     # Skills API is mounted at /api/skills
     app.include_router(skills.router)

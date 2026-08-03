@@ -755,6 +755,8 @@ discord = [
 ]
 knowledge = [
     { name = "deerflow-harness", extra = ["knowledge"] },
+    { name = "torch", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "torchvision", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 monocle = [
     { name = "deerflow-harness", extra = ["monocle"] },
@@ -801,6 +803,10 @@ requires-dist = [
     { name = "python-telegram-bot", specifier = ">=21.0" },
     { name = "slack-sdk", specifier = ">=3.33.0" },
     { name = "sse-starlette", specifier = ">=2.1.0" },
+    { name = "torch", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'knowledge'", specifier = ">=2.2.2" },
+    { name = "torch", marker = "platform_machine == 'x86_64' and sys_platform == 'darwin' and extra == 'knowledge'", specifier = ">=2.2.2,<2.3.0" },
+    { name = "torchvision", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'knowledge'", specifier = ">=0.17.2" },
+    { name = "torchvision", marker = "platform_machine == 'x86_64' and sys_platform == 'darwin' and extra == 'knowledge'", specifier = ">=0.17.2,<0.18.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
     { name = "wecom-aibot-python-sdk", specifier = ">=0.1.6" },
 ]
@@ -878,6 +884,8 @@ knowledge = [
     { name = "llama-index-retrievers-bm25" },
     { name = "llama-index-vector-stores-postgres" },
     { name = "psycopg2-binary" },
+    { name = "torch", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "torchvision", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 monocle = [
     { name = "monocle-apptrace" },
@@ -958,6 +966,12 @@ requires-dist = [
     { name = "tavily-python", specifier = ">=0.7.17" },
     { name = "textual", marker = "extra == 'tui'", specifier = ">=0.80" },
     { name = "tiktoken", specifier = ">=0.8.0" },
+    { name = "torch", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'knowledge'", specifier = ">=2.2.2" },
+    { name = "torch", marker = "platform_machine == 'x86_64' and sys_platform == 'darwin' and extra == 'knowledge'", specifier = ">=2.2.2,<2.3.0" },
+    { name = "torch", marker = "platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'knowledge'", specifier = "==2.2.2+cpu", index = "https://download.pytorch.org/whl/cpu" },
+    { name = "torchvision", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'knowledge'", specifier = ">=0.17.2" },
+    { name = "torchvision", marker = "platform_machine == 'x86_64' and sys_platform == 'darwin' and extra == 'knowledge'", specifier = ">=0.17.2,<0.18.0" },
+    { name = "torchvision", marker = "platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'knowledge'", specifier = "==0.17.2+cpu", index = "https://download.pytorch.org/whl/cpu" },
 ]
 provides-extras = ["tui", "groundroute", "ollama", "postgres", "redis", "pymupdf", "knowledge", "boxlite", "monocle", "browser"]
 

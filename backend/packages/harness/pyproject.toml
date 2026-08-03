@@ -79,6 +79,13 @@ knowledge = [
     "jieba>=0.42.1",
     "psycopg2-binary>=2.9.0",
     "docling>=2.0.0,<3",
+    # Docling layout/OCR models; aligned with backend/pyproject.toml uv constraints.
+    "torch>=2.2.2,<2.3.0; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "torchvision>=0.17.2,<0.18.0; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "torch>=2.2.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "torchvision>=0.17.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "torch==2.2.2+cpu; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "torchvision==0.17.2+cpu; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 boxlite = ["boxlite>=0.9.7"]
 # Agent observability (Monocle). Optional so a default install stays free of the
