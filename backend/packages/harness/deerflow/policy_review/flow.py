@@ -82,6 +82,30 @@ def flow_active(messages: list) -> bool:
     return False
 
 
+def _message_field(message: Any, key: str) -> Any:
+    value = getattr(message, key, None)
+    if value is not None:
+        return value
+    if isinstance(message, dict):
+        return message.get(key)
+    return None
+
+
+def extract_legal_review_artifact(messages: list) -> dict[str, Any] | None:
+    """Return the latest terminal ``legal-review.v1`` payload from checkpoint messages."""
+    for message in reversed(messages or []):
+        if _message_field(message, "name") != "policy_finalize":
+            continue
+        artifact = _message_field(message, "artifact")
+        if not isinstance(artifact, dict):
+            continue
+        if artifact.get("schema_hint") != LEGAL_REVIEW_V1:
+            continue
+        if str(artifact.get("review_status") or "") in _TERMINAL_REVIEW:
+            return artifact
+    return None
+
+
 def finalize_delivered(messages: list) -> bool:
     turn = turn_messages(messages)
     if _finalize_delivered(turn):

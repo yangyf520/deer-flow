@@ -18,6 +18,7 @@ from app.gateway.deps import get_feedback_repo, get_run_event_store, get_run_man
 from app.gateway.pagination import trim_run_message_page
 from app.gateway.run_models import RunCreateRequest
 from app.gateway.services import build_checkpoint_state_accessor, sse_consumer, start_run, wait_for_run_completion
+from deerflow.agents.structured_delivery import attach_structured_delivery
 from deerflow.runtime import serialize_channel_values_for_api
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,7 @@ async def stateless_wait(body: RunCreateRequest, request: Request) -> dict:
             snapshot = await accessor.aget(config)
             snapshot_config = snapshot.config or {}
             if snapshot_config.get("configurable", {}).get("checkpoint_id"):
-                return serialize_channel_values_for_api(snapshot.values)
+                return attach_structured_delivery(serialize_channel_values_for_api(snapshot.values))
         except Exception:
             logger.exception("Failed to fetch final state for run %s", record.run_id)
 
