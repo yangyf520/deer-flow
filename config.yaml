@@ -213,38 +213,7 @@ knowledge:
       api_base: $CHAT_BASE_URL
       auto: true
     fusion_mode: reciprocal_rerank
-  scenarios:
-  - type: general-qa
-    top_k: 8
-    score: 0.35
-  - type: policy-review
-    top_k: 10
-    score: 0.3
-    merge_mode: slot_then_rrf
-    lanes:
-    - kinds:
-      - policy
-      tags:
-      - statute
-      - national-law
-      budget: 4
-    - kinds:
-      - policy
-      tags:
-      - company-policy
-      budget: 3
-    - kinds:
-      - reference
-      budget: 2
-    - kinds:
-      - case
-      budget: 3
-  - type: finance-review
-    top_k: 8
-    score: 0.32
-  - type: onboarding
-    top_k: 6
-    score: 0.35
+  # Scenarios / kinds / tags are user-managed in DB (pub_codes), not config.yaml.
   authz:
     system_admin_is_space_admin: true
     allow_user_create_space: true
