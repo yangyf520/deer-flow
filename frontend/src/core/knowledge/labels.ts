@@ -4,14 +4,52 @@ import type { SpaceAccessValue, SpaceRoleValue } from "./api";
 
 type KnowledgeT = Translations["knowledge"];
 
-export type KindCatalogEntry = { id: string };
+/** Tag group entry from knowledge catalog API. */
+export type TagGroupCatalogEntry = {
+  id: string;
+  tags: string[];
+  label?: string;
+  scenario?: string;
+};
 
-export function kindLabel(kindId: string, t: KnowledgeT): string {
-  return t.kinds[kindId] ?? kindId;
+export type TagGroupId = string;
+
+export function scenarioLabel(
+  scenarioType: string,
+  t: KnowledgeT,
+  entry?: { label?: string },
+): string {
+  if (entry?.label?.trim()) return entry.label.trim();
+  return t.scenarios[scenarioType] ?? scenarioType;
 }
 
-export function scenarioLabel(scenarioType: string, t: KnowledgeT): string {
-  return t.scenarios[scenarioType] ?? scenarioType;
+export function scenarioSpaceId(scenario: {
+  type: string;
+  space_id?: string | null;
+}): string {
+  const linked = scenario.space_id?.trim();
+  if (!linked) return scenario.type;
+  return linked;
+}
+
+/** Catalog owner knowledge space id (码表归属). */
+export function scenarioCatalogHostId(scenario: {
+  host_space_id?: string | null;
+}): string | null {
+  const host = scenario.host_space_id?.trim();
+  if (!host) return null;
+  return host;
+}
+
+/** Whether a scenario belongs to the active catalog host (unassigned matches any host). */
+export function scenarioMatchesCatalogHost(
+  scenario: { host_space_id?: string | null },
+  hostId: string | null,
+): boolean {
+  if (!hostId) return true;
+  const host = scenarioCatalogHostId(scenario);
+  if (!host) return true;
+  return host === hostId;
 }
 
 export function boundScenarioType(
@@ -24,98 +62,87 @@ export function boundScenarioType(
   return space.scenario ?? space.default_scenarios?.[0] ?? null;
 }
 
-/** Kind ids configured on a scenario pack (from lanes). */
-function scenarioKinds(
-  scenario: { kinds?: string[] | null } | null | undefined,
-): string[] {
-  return (scenario?.kinds ?? []).filter(Boolean);
-}
-
-export function kindsForScenario(
-  scenario: { kinds?: string[] | null } | null | undefined,
-  catalog: KindCatalogEntry[] = [],
-): KindCatalogEntry[] {
-  const ids = scenarioKinds(scenario);
-  if (ids.length === 0) return [];
-  const byId = new Map(catalog.map((k) => [k.id, k]));
-  return ids.map((id) => byId.get(id) ?? { id });
-}
-
-export function uploadKindsForSpace(
+/** Default document kind for import when the UI no longer exposes kind selection. */
+export function importKindForSpace(
   space: {
     allowed_kinds?: string[] | null;
     scenario?: string | null;
     default_scenarios?: string[] | null;
   } | null,
-  catalog: KindCatalogEntry[],
   scenarios?: { type: string; kinds?: string[] | null }[],
-): KindCatalogEntry[] {
+): string {
   const allowed = (space?.allowed_kinds ?? []).filter(Boolean);
-  if (allowed.length > 0) {
-    const allowSet = new Set(allowed);
-    return catalog.filter((k) => allowSet.has(k.id));
-  }
-  const st = space?.scenario ?? space?.default_scenarios?.[0] ?? null;
+  if (allowed.length > 0) return allowed[0]!;
+  const scenarioType = boundScenarioType(space);
   const pack =
-    st && scenarios ? scenarios.find((s) => s.type === st) : undefined;
-  const fromScenario = kindsForScenario(pack, catalog);
-  if (fromScenario.length > 0) return fromScenario;
-  return catalog;
+    scenarioType && scenarios
+      ? scenarios.find((s) => s.type === scenarioType)
+      : undefined;
+  const fromScenario = (pack?.kinds ?? []).filter(Boolean);
+  if (fromScenario.length > 0) return fromScenario[0]!;
+  return "general";
 }
 
-export function docKindOptionsFor(
-  doc: { kind: string },
-  candidates: KindCatalogEntry[],
-): KindCatalogEntry[] {
-  if (!doc.kind || candidates.some((k) => k.id === doc.kind)) return candidates;
-  return [{ id: doc.kind }, ...candidates];
+export function tagLabel(tagId: string, t: KnowledgeT): string {
+  return t.tags?.[tagId] ?? tagId;
 }
-
-export function defaultUploadKind(
-  candidates: KindCatalogEntry[],
-): string | null {
-  if (candidates.length === 0) return null;
-  const prefer = ["policy", "reference", "general"];
-  for (const id of prefer) {
-    if (candidates.some((k) => k.id === id)) return id;
-  }
-  return candidates[0]?.id ?? null;
-}
-
-/** Policy lane tags — align with config scenario lanes. */
-export const POLICY_TAG_GROUPS = [
-  { id: "national", tags: ["statute", "national-law"] as const },
-  { id: "company", tags: ["company-policy"] as const },
-] as const;
-
-export type PolicyTagGroupId = (typeof POLICY_TAG_GROUPS)[number]["id"];
 
 export function tagGroupLabel(
-  groupId: PolicyTagGroupId,
+  groupId: string,
   t: KnowledgeT,
+  entry?: Pick<TagGroupCatalogEntry, "label">,
 ): string {
+  if (entry?.label?.trim()) return entry.label.trim();
   return t.tagGroups[groupId] ?? groupId;
 }
 
-export function tagsFromPolicyGroups(
-  groupIds: Iterable<PolicyTagGroupId>,
+export function tagsFromTagGroups(
+  groupIds: Iterable<string>,
+  catalog: TagGroupCatalogEntry[],
 ): string[] {
   const want = new Set(groupIds);
   const out: string[] = [];
-  for (const group of POLICY_TAG_GROUPS) {
+  for (const group of catalog) {
     if (!want.has(group.id)) continue;
     out.push(...group.tags);
   }
   return [...new Set(out)];
 }
 
-export function policyGroupsFromTags(
+export function tagGroupsFromTags(
   tags: string[] | undefined,
-): PolicyTagGroupId[] {
+  catalog: TagGroupCatalogEntry[],
+): TagGroupId[] {
   const have = new Set(tags ?? []);
-  return POLICY_TAG_GROUPS.filter((g) => g.tags.some((t) => have.has(t))).map(
-    (g) => g.id,
-  );
+  return catalog
+    .filter((g) => g.tags.some((t) => have.has(t)))
+    .map((g) => g.id);
+}
+
+/** Tag groups applicable to a scenario's policy lanes (intersect lane tags with catalog). */
+export function tagGroupsForScenario(
+  scenario:
+    | { type?: string; lanes?: { kinds?: string[]; tags?: string[] }[] | null }
+    | null
+    | undefined,
+  catalog: TagGroupCatalogEntry[],
+  kind = "policy",
+): TagGroupCatalogEntry[] {
+  const scenarioType = scenario?.type;
+  let groups = catalog;
+  if (scenarioType) {
+    groups = catalog.filter((g) => !g.scenario || g.scenario === scenarioType);
+  }
+  const lanes = scenario?.lanes ?? [];
+  if (lanes.length === 0) return groups;
+  const laneTags = new Set<string>();
+  for (const lane of lanes) {
+    if ((lane.kinds ?? []).includes(kind)) {
+      for (const t of lane.tags ?? []) laneTags.add(t);
+    }
+  }
+  if (laneTags.size === 0) return [];
+  return groups.filter((g) => g.tags.some((t) => laneTags.has(t)));
 }
 
 export function accessLabel(value: string, t: KnowledgeT): string {

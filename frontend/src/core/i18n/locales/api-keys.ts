@@ -16,6 +16,7 @@ export type ApiKeysTranslations = {
   copyButton: string;
   editButton: string;
   editTitle: string;
+  sectionBasic: string;
   saveButton: string;
   updating: string;
   updateSuccess: string;
@@ -57,6 +58,7 @@ export const apiKeysEnUS: ApiKeysTranslations = {
   copyButton: "Copy",
   editButton: "Edit",
   editTitle: "Edit API key",
+  sectionBasic: "Basics",
   saveButton: "Save",
   updating: "Saving…",
   updateSuccess: "API key updated",
@@ -98,6 +100,7 @@ export const apiKeysZhCN: ApiKeysTranslations = {
   copyButton: "复制",
   editButton: "编辑",
   editTitle: "编辑 API 密钥",
+  sectionBasic: "基本信息",
   saveButton: "保存",
   updating: "保存中…",
   updateSuccess: "API 密钥已更新",

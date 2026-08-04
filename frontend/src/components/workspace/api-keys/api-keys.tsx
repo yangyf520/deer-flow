@@ -76,7 +76,7 @@ function ApiKeyFormBody({
   nameAutoFocus?: boolean;
 }) {
   return (
-    <DialogFormSection>
+    <DialogFormSection title={ak.sectionBasic}>
       <DialogFieldGrid>
         <DialogInputField
           label={ak.fieldName}
@@ -315,7 +315,7 @@ export function ApiKeyEditDialog({
         apiKey
           ? {
               created_at: apiKey.created_at,
-              created_by: apiKey.created_by_name,
+              created_by_name: apiKey.created_by_name,
             }
           : null,
         locale,

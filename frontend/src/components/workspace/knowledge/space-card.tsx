@@ -16,11 +16,15 @@ import {
   itemMetaTags,
 } from "@/components/component";
 import { useI18n } from "@/core/i18n/hooks";
-import { boundScenarioType } from "@/core/knowledge";
-import { accessLabel, scenarioLabel, type Space } from "@/core/knowledge";
+import {
+  accessLabel,
+  boundScenarioType,
+  scenarioLabel,
+  type Space,
+} from "@/core/knowledge";
 import { cn } from "@/lib/utils";
 
-interface KnowledgeSpaceCardProps {
+interface SpaceCardProps {
   space: Space;
   onEdit?: (space: Space) => void;
 }
@@ -28,7 +32,7 @@ interface KnowledgeSpaceCardProps {
 const actionClass =
   "min-w-0 w-full justify-center px-1 text-[11px] sm:px-1.5 sm:text-xs";
 
-export function KnowledgeSpaceCard({ space, onEdit }: KnowledgeSpaceCardProps) {
+export function SpaceCard({ space, onEdit }: SpaceCardProps) {
   const { t } = useI18n();
   const kb = t.knowledge;
   const href = `/workspace/knowledge/${space.id}`;

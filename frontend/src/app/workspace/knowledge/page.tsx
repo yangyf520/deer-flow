@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import type { UploadMode } from "@/app/workspace/knowledge/ui";
 import {
   AlertError,
   HeaderCreateButton,
@@ -17,47 +18,64 @@ import {
 } from "@/components/component";
 import { workspacePageInsetXClass } from "@/components/component/styles";
 import {
-  KnowledgeSpaceCard,
-  KnowledgeSpaceCreateDialog,
-  KnowledgeSpaceEditDialog,
+  SpaceCard,
+  SpaceCreateDialog,
+  SpaceEditDialog,
 } from "@/components/workspace/knowledge";
 import { useI18n } from "@/core/i18n/hooks";
 import {
-  boundScenarioType,
   createSpace,
-  kindsForScenario,
+  deleteSpace,
   listMySpaces,
-  listScenarios,
+  readStoredIngestMode,
+  storeIngestMode,
   updateSpace,
-  type ScenarioPack,
   type Space,
 } from "@/core/knowledge";
 import { cn } from "@/lib/utils";
 
+const DEFAULT_TOP_K = 8;
+const DEFAULT_SCORE = 0.35;
+
+function parseRetrievalPayload(topK: string, score: string) {
+  const parsedTopK = Number.parseInt(topK, 10);
+  const parsedScore = Number.parseFloat(score);
+  return {
+    top_k:
+      Number.isFinite(parsedTopK) && parsedTopK >= 1 && parsedTopK <= 50
+        ? parsedTopK
+        : DEFAULT_TOP_K,
+    score:
+      Number.isFinite(parsedScore) && parsedScore >= 0 && parsedScore <= 1
+        ? parsedScore
+        : DEFAULT_SCORE,
+  };
+}
+
 export default function KnowledgeSpacesPage() {
   const { t } = useI18n();
   const [spaces, setSpaces] = useState<Space[]>([]);
-  const [scenarios, setScenarios] = useState<ScenarioPack[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [access, setAccess] = useState("open");
-  const [scenarioType, setScenarioType] = useState("");
-  /** ``__all__`` = all kinds configured on the scenario lanes. */
-  const [allowedKind, setAllowedKind] = useState("__all__");
+  const [ingestMode, setIngestMode] = useState<UploadMode>("unstructured");
+  const [topK, setTopK] = useState(String(DEFAULT_TOP_K));
+  const [score, setScore] = useState(String(DEFAULT_SCORE));
   const [busy, setBusy] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [editingSpace, setEditingSpace] = useState<Space | null>(null);
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editAccess, setEditAccess] = useState("open");
-  const [editScenario, setEditScenario] = useState("");
+  const [editIngestMode, setEditIngestMode] =
+    useState<UploadMode>("unstructured");
+  const [editTopK, setEditTopK] = useState(String(DEFAULT_TOP_K));
+  const [editScore, setEditScore] = useState(String(DEFAULT_SCORE));
   const [editBusy, setEditBusy] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [query, setQuery] = useState("");
 
-  const selectedScenario =
-    scenarios.find((s) => s.type === scenarioType) ?? null;
-  const scenarioKindOptions = kindsForScenario(selectedScenario);
   const q = query.trim().toLowerCase();
   const filteredSpaces = !q
     ? spaces
@@ -78,17 +96,8 @@ export default function KnowledgeSpacesPage() {
 
   const reload = useCallback(async () => {
     try {
-      const [spacesRes, scenariosRes] = await Promise.all([
-        listMySpaces(),
-        listScenarios(),
-      ]);
+      const spacesRes = await listMySpaces();
       setSpaces(spacesRes.items);
-      setScenarios(scenariosRes.items);
-      setScenarioType((prev) => {
-        if (prev && scenariosRes.items.some((s) => s.type === prev))
-          return prev;
-        return scenariosRes.items[0]?.type ?? "";
-      });
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -100,19 +109,23 @@ export default function KnowledgeSpacesPage() {
   }, [reload]);
 
   async function onCreate() {
-    if (!name.trim() || !scenarioType) return;
+    if (!name.trim()) return;
     setBusy(true);
     try {
-      await createSpace({
+      const retrieval = parseRetrievalPayload(topK, score);
+      const created = await createSpace({
         name: name.trim(),
         description: description.trim() || undefined,
         access,
-        scenario: scenarioType,
-        allowed_kinds: allowedKind === "__all__" ? undefined : [allowedKind],
+        top_k: retrieval.top_k,
+        score: retrieval.score,
       });
+      storeIngestMode(created.id, ingestMode);
       setName("");
       setDescription("");
-      setAllowedKind("__all__");
+      setIngestMode("unstructured");
+      setTopK(String(DEFAULT_TOP_K));
+      setScore(String(DEFAULT_SCORE));
       setCreateOpen(false);
       await reload();
     } catch (e) {
@@ -127,7 +140,13 @@ export default function KnowledgeSpacesPage() {
     setEditName(space.name);
     setEditDescription(space.description ?? "");
     setEditAccess(space.access);
-    setEditScenario(boundScenarioType(space) ?? "");
+    setEditIngestMode(readStoredIngestMode(space.id));
+    setEditTopK(
+      space.top_k != null ? String(space.top_k) : String(DEFAULT_TOP_K),
+    );
+    setEditScore(
+      space.score != null ? String(space.score) : String(DEFAULT_SCORE),
+    );
   }
 
   async function onSaveEditSpace() {
@@ -140,12 +159,15 @@ export default function KnowledgeSpacesPage() {
     setEditBusy(true);
     setError(null);
     try {
+      const retrieval = parseRetrievalPayload(editTopK, editScore);
       await updateSpace(editingSpace.id, {
         name: trimmedName,
         description: editDescription.trim(),
         access: editAccess,
-        scenario: editScenario || undefined,
+        top_k: retrieval.top_k,
+        score: retrieval.score,
       });
+      storeIngestMode(editingSpace.id, editIngestMode);
       setEditingSpace(null);
       toast.success(t.knowledge.spaceUpdated);
       await reload();
@@ -153,6 +175,22 @@ export default function KnowledgeSpacesPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setEditBusy(false);
+    }
+  }
+
+  async function onDeleteEditSpace() {
+    if (!editingSpace) return;
+    setDeleteBusy(true);
+    setError(null);
+    try {
+      await deleteSpace(editingSpace.id);
+      setEditingSpace(null);
+      toast.success(t.common.delete);
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
@@ -204,11 +242,7 @@ export default function KnowledgeSpacesPage() {
             <div className={cn(workspacePageInsetXClass, "pt-2 pb-3")}>
               <ItemGrid density="dense">
                 {filteredSpaces.map((s) => (
-                  <KnowledgeSpaceCard
-                    key={s.id}
-                    space={s}
-                    onEdit={openEditSpace}
-                  />
+                  <SpaceCard key={s.id} space={s} onEdit={openEditSpace} />
                 ))}
               </ItemGrid>
             </div>
@@ -216,7 +250,7 @@ export default function KnowledgeSpacesPage() {
         </ItemListPanel>
       </Shell>
 
-      <KnowledgeSpaceCreateDialog
+      <SpaceCreateDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
         name={name}
@@ -225,17 +259,17 @@ export default function KnowledgeSpacesPage() {
         setDescription={setDescription}
         access={access}
         setAccess={setAccess}
-        scenarioType={scenarioType}
-        setScenarioType={setScenarioType}
-        scenarios={scenarios}
-        scenarioKindOptions={scenarioKindOptions}
-        allowedKind={allowedKind}
-        setAllowedKind={setAllowedKind}
+        ingestMode={ingestMode}
+        setIngestMode={setIngestMode}
+        topK={topK}
+        setTopK={setTopK}
+        score={score}
+        setScore={setScore}
         busy={busy}
         onConfirm={() => void onCreate()}
       />
 
-      <KnowledgeSpaceEditDialog
+      <SpaceEditDialog
         open={editingSpace !== null}
         onOpenChange={(open) => {
           if (!open) setEditingSpace(null);
@@ -247,11 +281,16 @@ export default function KnowledgeSpacesPage() {
         setDescription={setEditDescription}
         access={editAccess}
         setAccess={setEditAccess}
-        scenarioType={editScenario}
-        setScenarioType={setEditScenario}
-        scenarios={scenarios}
+        ingestMode={editIngestMode}
+        setIngestMode={setEditIngestMode}
+        topK={editTopK}
+        setTopK={setEditTopK}
+        score={editScore}
+        setScore={setEditScore}
         busy={editBusy}
+        deleteBusy={deleteBusy}
         onConfirm={() => void onSaveEditSpace()}
+        onDelete={() => onDeleteEditSpace()}
       />
     </>
   );

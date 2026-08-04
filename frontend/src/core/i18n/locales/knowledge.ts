@@ -11,8 +11,51 @@ export type KnowledgeTranslations = {
   emptySpaces: string;
   spaceCount: string;
   createSpace: string;
+  catalogButton: string;
+  catalogTitle: string;
+  catalogDescription: string;
+  catalogListTitle: string;
+  catalogCountTotal: (count: number) => string;
+  catalogCountFiltered: (shown: number, total: number) => string;
+  catalogSearchPlaceholder: string;
+  catalogSearchEmpty: string;
+  catalogEmpty: string;
+  catalogKinds: string;
+  catalogTagGroups: string;
+  catalogScenarioCode: string;
+  catalogSpaceCode: string;
+  catalogSwitchSpace: string;
+  catalogAllSpaces: string;
+  catalogMigrateHostTitle: string;
+  catalogMigrateHostDescription: string;
+  catalogMigrateHostSelect: string;
+  catalogMigrateHostCurrentLabel: string;
+  catalogMigrateHostCurrent: (name: string) => string;
+  catalogMigrated: (count: number) => string;
+  catalogOpenSpace: string;
+  createScenario: string;
+  editScenario: string;
+  catalogFieldLabel: string;
+  catalogFieldLabelPlaceholder: string;
+  catalogCodePlaceholder: string;
+  catalogCodeHint: string;
+  catalogCodeInvalid: string;
+  catalogDescriptionPlaceholder: string;
+  catalogDeleteConfirm: string;
+  scenarioCreated: string;
+  scenarioUpdated: string;
+  scenarioDeleted: string;
+  fieldTopK: string;
+  fieldScore: string;
   editSpace: string;
+  editDocument: string;
+  documentUpdated: string;
+  sectionBasic: string;
+  sectionDocument: string;
+  sectionUpload: string;
+  sectionUploadFile: string;
   spaceUpdated: string;
+  spaceDeleted: string;
   fieldName: string;
   namePlaceholder: string;
   fieldDescription: string;
@@ -34,6 +77,24 @@ export type KnowledgeTranslations = {
   docsCountFiltered: string;
   upload: string;
   uploading: string;
+  uploadDialogTitle: string;
+  uploadDialogDescription: string;
+  uploadModeLabel: string;
+  uploadModeUnstructured: string;
+  uploadModeStructured: string;
+  uploadModeUnstructuredHint: string;
+  uploadModeStructuredHint: string;
+  uploadFileLabel: string;
+  uploadSegmentPromptLabel: string;
+  parseAction: string;
+  vectorize: string;
+  vectorizing: string;
+  parsePreviewTitle: string;
+  selectFile: string;
+  noFileSelected: string;
+  structuredParsing: string;
+  structuredImported: (segments: number) => string;
+  structuredReindexed: string;
   filterAllKinds: string;
   selectKind: string;
   searchFilename: string;
@@ -44,6 +105,7 @@ export type KnowledgeTranslations = {
   reindexing: string;
   reindexTooltip: string;
   deleteTooltip: string;
+  stopProcessingTooltip: string;
   deleting: string;
   fieldKind: string;
   fieldKindHint: string;
@@ -114,7 +176,8 @@ export type KnowledgeTranslations = {
   parseQualityHint: Record<"ok" | "degraded" | "failed", string>;
   kinds: Record<string, string>;
   scenarios: Record<string, string>;
-  tagGroups: Record<"national" | "company", string>;
+  tagGroups: Record<string, string>;
+  tags?: Record<string, string>;
 };
 
 export const knowledgeEnUS: KnowledgeTranslations = {
@@ -130,8 +193,59 @@ export const knowledgeEnUS: KnowledgeTranslations = {
   emptySpaces: "No knowledge spaces yet",
   spaceCount: "{count} spaces",
   createSpace: "New space",
+  catalogButton: "Scenarios",
+  catalogTitle: "Catalog management",
+  catalogDescription:
+    "Maintain code-table entries for spaces and other modules.",
+  catalogListTitle: "Catalog management",
+  catalogCountTotal: (count) => `Catalog count ${count}`,
+  catalogCountFiltered: (shown, total) => `Catalog count ${shown} / ${total}`,
+  catalogSearchPlaceholder: "Search catalog…",
+  catalogSearchEmpty: "No matching catalog entries.",
+  catalogEmpty: "No catalog entries yet.",
+  catalogKinds: "Document kinds",
+  catalogTagGroups: "Tag groups",
+  catalogScenarioCode: "Code",
+  catalogSpaceCode: "Knowledge space",
+  catalogSwitchSpace: "Switch space",
+  catalogAllSpaces: "All spaces",
+  catalogMigrateHostTitle: "Switch knowledge space",
+  catalogMigrateHostDescription:
+    "Move all catalog entries to another knowledge space. Document spaces linked to each entry are unchanged.",
+  catalogMigrateHostSelect: "Target space",
+  catalogMigrateHostCurrentLabel: "Current space",
+  catalogMigrateHostCurrent: (name) => `Current: ${name}`,
+  catalogMigrated: (count) =>
+    count === 1
+      ? "Moved 1 catalog entry to the selected space"
+      : `Moved ${count} catalog entries to the selected space`,
+  catalogOpenSpace: "Open space",
+  createScenario: "New entry",
+  editScenario: "Edit entry",
+  catalogFieldLabel: "Display name",
+  catalogFieldLabelPlaceholder: "e.g. Policy review",
+  catalogCodePlaceholder: "e.g. finance-review",
+  catalogCodeHint:
+    "Lowercase letters, numbers, and hyphens. Also used as the linked knowledge space id.",
+  catalogCodeInvalid:
+    "Use lowercase letters, numbers, and hyphens (e.g. finance-review).",
+  catalogDescriptionPlaceholder: "What this entry is for",
+  catalogDeleteConfirm:
+    "Delete this catalog entry and its linked knowledge space? This cannot be undone.",
+  scenarioCreated: "Catalog entry created",
+  scenarioUpdated: "Catalog entry updated",
+  scenarioDeleted: "Catalog entry deleted",
+  fieldTopK: "Top K",
+  fieldScore: "Score threshold",
   editSpace: "Edit space",
+  editDocument: "Edit document",
+  documentUpdated: "Document updated",
+  sectionBasic: "Basics",
+  sectionDocument: "Document",
+  sectionUpload: "Upload",
+  sectionUploadFile: "Select file",
   spaceUpdated: "Space updated",
+  spaceDeleted: "Space deleted",
   fieldName: "Name",
   namePlaceholder: "e.g. Product docs",
   fieldDescription: "Description",
@@ -153,7 +267,30 @@ export const knowledgeEnUS: KnowledgeTranslations = {
   docsCountFiltered: "{filtered} / {total}",
   upload: "Upload",
   uploading: "Uploading…",
-  filterAllKinds: "All kinds",
+  uploadDialogTitle: "Upload document",
+  uploadDialogDescription: "Pick a split mode and file to index in this space.",
+  uploadModeLabel: "Split mode",
+  uploadModeUnstructured: "Auto chunk",
+  uploadModeStructured: "Structured",
+  uploadModeUnstructuredHint:
+    "Upload the file directly. DeerFlow splits and embeds it with the default ingest pipeline.",
+  uploadModeStructuredHint:
+    "Run the document parse API first, then store the segmented result in this knowledge space.",
+  uploadFileLabel: "File",
+  uploadSegmentPromptLabel: "Segment prompt",
+  parseAction: "Parse",
+  vectorize: "Vectorize",
+  vectorizing: "Vectorizing…",
+  parsePreviewTitle: "Parse result",
+  selectFile: "Choose file",
+  noFileSelected: "No file selected",
+  structuredParsing: "Parsing…",
+  structuredImported: (segments) =>
+    segments === 1
+      ? "Structured document imported (1 segment)."
+      : `Structured document imported (${segments} segments).`,
+  structuredReindexed: "Structured re-index completed.",
+  filterAllKinds: "All",
   selectKind: "Filter by kind",
   searchFilename: "Search filename…",
   noMatchingDocs: "No documents match the current filters",
@@ -163,6 +300,7 @@ export const knowledgeEnUS: KnowledgeTranslations = {
   reindexing: "Rebuilding…",
   reindexTooltip: "Re-run parsing and embedding",
   deleteTooltip: "Delete document",
+  stopProcessingTooltip: "Stop processing and delete",
   deleting: "Deleting…",
   fieldKind: "Document kind",
   fieldKindHint: "Kind controls parsing and chunking strategy",
@@ -263,19 +401,29 @@ export const knowledgeEnUS: KnowledgeTranslations = {
   },
   kinds: {
     policy: "Policy",
-    reference: "Reference",
+    reference: "Regulations",
     general: "General",
     sop: "SOP",
     case: "Case",
     faq: "FAQ",
   },
   scenarios: {
-    "general-qa": "General Q&A",
-    "policy-review": "Policy review",
+    auto: "Autonomous driving",
+    health: "Smart healthcare",
+    fintech: "FinTech",
+    "smart-city": "Smart city",
+    education: "Education",
+    business: "Business",
+    "culture-media": "Culture & entertainment",
   },
   tagGroups: {
     national: "National regulations",
     company: "Company policy",
+  },
+  tags: {
+    statute: "Statute",
+    "national-law": "National law",
+    "company-policy": "Company policy",
   },
 };
 
@@ -292,11 +440,55 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   emptySpaces: "还没有知识空间",
   spaceCount: "{count} 个空间",
   createSpace: "新建空间",
+  catalogButton: "场景管理",
+  catalogTitle: "码表管理",
+  catalogDescription: "维护知识库码表，供空间等业务模块选用。",
+  catalogListTitle: "码表管理",
+  catalogCountTotal: (count) => `码表数量 ${count}`,
+  catalogCountFiltered: (shown, total) => `码表数量 ${shown} / ${total}`,
+  catalogSearchPlaceholder: "检索码表信息…",
+  catalogSearchEmpty: "没有匹配的码表项。",
+  catalogEmpty: "暂无码表条目。",
+  catalogKinds: "文档分类",
+  catalogTagGroups: "标签组",
+  catalogScenarioCode: "编码",
+  catalogSpaceCode: "知识库",
+  catalogSwitchSpace: "切换知识库",
+  catalogAllSpaces: "全部知识库",
+  catalogMigrateHostTitle: "切换知识库",
+  catalogMigrateHostDescription:
+    "将全部码表条目迁移到所选知识库。各条目关联的文档空间不会变更。",
+  catalogMigrateHostSelect: "目标知识库",
+  catalogMigrateHostCurrentLabel: "当前知识库",
+  catalogMigrateHostCurrent: (name) => `当前：${name}`,
+  catalogMigrated: (count) => `已将 ${count} 条码表迁移至所选知识库`,
+  catalogOpenSpace: "打开知识库",
+  createScenario: "新建码表",
+  editScenario: "编辑码表",
+  catalogFieldLabel: "名称",
+  catalogFieldLabelPlaceholder: "例如：制度预审",
+  catalogCodePlaceholder: "例如：finance-review",
+  catalogCodeHint: "小写英文、数字与连字符；同时作为关联知识空间的编码。",
+  catalogCodeInvalid: "请使用小写英文、数字与连字符（如 finance-review）。",
+  catalogDescriptionPlaceholder: "此码表条目的用途",
+  catalogDeleteConfirm: "确定删除此码表条目及关联的知识库？此操作不可恢复。",
+  scenarioCreated: "码表已创建",
+  scenarioUpdated: "码表已更新",
+  scenarioDeleted: "码表已删除",
+  fieldTopK: "召回数量",
+  fieldScore: "相似度阈值",
   editSpace: "编辑空间",
+  editDocument: "编辑文档",
+  documentUpdated: "文档已更新",
+  sectionBasic: "基本信息",
+  sectionDocument: "文档属性",
+  sectionUpload: "上传设置",
+  sectionUploadFile: "文件选择",
   spaceUpdated: "空间已更新",
-  fieldName: "名称",
+  spaceDeleted: "空间已删除",
+  fieldName: "空间名称",
   namePlaceholder: "例如：产品文档",
-  fieldDescription: "描述",
+  fieldDescription: "空间描述",
   descriptionPlaceholder: "这个空间的用途",
   fieldAccess: "访问权限",
   fieldScenario: "场景",
@@ -315,7 +507,28 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   docsCountFiltered: "{filtered} / {total}",
   upload: "上传",
   uploading: "上传中…",
-  filterAllKinds: "全部类型",
+  uploadDialogTitle: "上传文档",
+  uploadDialogDescription: "选择拆分方式并上传文件，写入当前知识空间。",
+  uploadModeLabel: "拆分方式",
+  uploadModeUnstructured: "自动分块",
+  uploadModeStructured: "结构化",
+  uploadModeUnstructuredHint: "直接上传文件，按默认流水线拆分并向量化。",
+  uploadModeStructuredHint: "先调用文档解析接口切条，再将解析结果写入知识库。",
+  uploadFileLabel: "文件",
+  uploadSegmentPromptLabel: "解析提示词",
+  parseAction: "解析",
+  vectorize: "向量化",
+  vectorizing: "向量化中…",
+  parsePreviewTitle: "解析结果",
+  selectFile: "选择文件",
+  noFileSelected: "尚未选择文件",
+  structuredParsing: "解析中…",
+  structuredImported: (segments) =>
+    segments === 1
+      ? "结构化文档已入库（1 个片段）。"
+      : `结构化文档已入库（${segments} 个片段）。`,
+  structuredReindexed: "结构化重建已完成。",
+  filterAllKinds: "全部",
   selectKind: "按类型筛选",
   searchFilename: "搜索文件名…",
   noMatchingDocs: "没有符合筛选条件的文档",
@@ -325,10 +538,11 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   reindexing: "重建中…",
   reindexTooltip: "重新解析并嵌入",
   deleteTooltip: "删除文档",
+  stopProcessingTooltip: "停止处理并删除",
   deleting: "删除中…",
-  fieldKind: "文档类型",
+  fieldKind: "知识分类",
   fieldKindHint: "类型决定解析与分块策略",
-  editTags: "标签",
+  editTags: "文档标签",
   uploadTagsHint: "制度通道的可选标签",
   dedupedNotice: "已跳过重复上传",
   chunks: "分块",
@@ -348,7 +562,7 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   dept: "部门",
   userPlaceholder: "用户 ID 或邮箱",
   deptPlaceholder: "部门 ID",
-  roleLabel: "角色",
+  roleLabel: "我的角色",
   upsertGrant: "保存授权",
   currentGrants: "当前授权",
   emptyGrants: "尚未配置授权",
@@ -424,18 +638,28 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   },
   kinds: {
     policy: "制度",
-    reference: "参考",
+    reference: "法规",
     general: "通用",
     sop: "SOP",
     case: "案例",
     faq: "FAQ",
   },
   scenarios: {
-    "general-qa": "通用问答",
-    "policy-review": "制度预审",
+    auto: "自动驾驶",
+    health: "智慧医疗",
+    fintech: "金融科技",
+    "smart-city": "智慧城市",
+    education: "教育",
+    business: "商业",
+    "culture-media": "文娱",
   },
   tagGroups: {
     national: "国家法规",
     company: "公司制度",
+  },
+  tags: {
+    statute: "法律",
+    "national-law": "国家法律",
+    "company-policy": "公司制度",
   },
 };

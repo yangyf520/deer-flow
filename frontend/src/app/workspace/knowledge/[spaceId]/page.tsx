@@ -5,7 +5,7 @@ import {
   FlaskConicalIcon,
   RotateCcwIcon,
   SearchIcon,
-  SettingsIcon,
+  TablePropertiesIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
@@ -21,35 +21,22 @@ import {
 } from "react";
 
 import {
-  KindSelect,
   ScenarioSelect,
   boundScenarioType,
+  type UploadMode,
 } from "@/app/workspace/knowledge/ui";
 import {
   AlertError,
+  ConfirmDialog,
   InlineEmpty,
   ItemListPanel,
   Shell,
   ShellHeader,
 } from "@/components/component";
+import { workspacePageInsetXClass } from "@/components/component/styles";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -57,6 +44,10 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  UploadDialog,
+  type UploadInput,
+} from "@/components/workspace/knowledge";
 import { Tooltip } from "@/components/workspace/tooltip";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { useI18n } from "@/core/i18n/hooks";
@@ -64,27 +55,24 @@ import type { Translations } from "@/core/i18n/locales/types";
 import {
   deleteDocument,
   getSpace,
-  importDocument,
-  kindLabel,
+  embedDocument,
+  listCatalog,
   listDocumentChunks,
   listDocuments,
-  listKinds,
-  listScenarios,
+  parseDocument,
+  resolveSegmentPrompt,
+  structuredMarkdownFile,
   phaseLabel,
+  readStoredIngestMode,
   reindexDocument,
   statusLabel,
-  updateDocument,
-  uploadKindsForSpace,
-  defaultUploadKind,
-  docKindOptionsFor,
-  POLICY_TAG_GROUPS,
+  storeIngestMode,
   tagGroupLabel,
-  tagsFromPolicyGroups,
-  policyGroupsFromTags,
-  type PolicyTagGroupId,
+  tagGroupsFromTags,
+  importKindForSpace,
   type DocumentChunk,
   type KnowledgeDocument,
-  type KnowledgeKind,
+  type KnowledgeTagGroup,
   type ScenarioPack,
   type Space,
 } from "@/core/knowledge";
@@ -181,15 +169,13 @@ export default function KnowledgeSpaceDocumentsPage() {
   const spaceId = params.spaceId;
   const { t, locale } = useI18n();
   const { user } = useAuth();
-  const fileRef = useRef<HTMLInputElement>(null);
   const reindexFileRef = useRef<HTMLInputElement>(null);
   const [reindexTargetId, setReindexTargetId] = useState<string | null>(null);
   const [space, setSpace] = useState<Space | null>(null);
   const [scenarios, setScenarios] = useState<ScenarioPack[]>([]);
-  const [kinds, setKinds] = useState<KnowledgeKind[]>([]);
-  /** List filter: ``__all__`` shows every kind; a concrete id also sets upload kind. */
-  const [kindFilter, setKindFilter] = useState<string>("__all__");
-  const [uploadKind, setUploadKind] = useState<string>("");
+  const [tagGroupsCatalog, setTagGroupsCatalog] = useState<KnowledgeTagGroup[]>(
+    [],
+  );
   const [docs, setDocs] = useState<KnowledgeDocument[]>([]);
   const [docsTotal, setDocsTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -220,29 +206,19 @@ export default function KnowledgeSpaceDocumentsPage() {
           .toLowerCase();
         return hay.includes(deferredChunkQuery);
       });
-  const [editDoc, setEditDoc] = useState<KnowledgeDocument | null>(null);
-  const [editKind, setEditKind] = useState("");
-  const [editTagGroups, setEditTagGroups] = useState<PolicyTagGroupId[]>([]);
-  const [metaSaving, setMetaSaving] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [ingestMode, setIngestMode] = useState<UploadMode>("unstructured");
   const [docsLoadingMore, setDocsLoadingMore] = useState(false);
   const [docToDelete, setDocToDelete] = useState<KnowledgeDocument | null>(
     null,
   );
-
-  const uploadKindOptions = useMemo(
-    () => uploadKindsForSpace(space, kinds, scenarios),
-    [space, kinds, scenarios],
-  );
-
-  const effectiveUploadKind =
-    kindFilter !== "__all__" ? kindFilter : uploadKind;
+  const uploadAbortRef = useRef<AbortController | null>(null);
 
   const docListFilters = useMemo(
     () => ({
-      kind: kindFilter === "__all__" ? undefined : kindFilter,
       q: deferredDocQuery || undefined,
     }),
-    [deferredDocQuery, kindFilter],
+    [deferredDocQuery],
   );
 
   const hasMoreDocs = docs.length < docsTotal;
@@ -251,13 +227,7 @@ export default function KnowledgeSpaceDocumentsPage() {
     try {
       const [s, d] = await Promise.all([
         getSpace(spaceId),
-        listDocuments(
-          spaceId,
-          DOC_PAGE_SIZE,
-          0,
-          docListFilters.kind,
-          docListFilters.q,
-        ),
+        listDocuments(spaceId, DOC_PAGE_SIZE, 0, undefined, docListFilters.q),
       ]);
       setSpace(s);
       setDocs(d.items);
@@ -276,7 +246,7 @@ export default function KnowledgeSpaceDocumentsPage() {
         spaceId,
         DOC_PAGE_SIZE,
         docs.length,
-        docListFilters.kind,
+        undefined,
         docListFilters.q,
       );
       setDocs((prev) => [...prev, ...d.items]);
@@ -289,34 +259,19 @@ export default function KnowledgeSpaceDocumentsPage() {
   }, [docListFilters, docs.length, docsLoadingMore, hasMoreDocs, spaceId]);
 
   useEffect(() => {
-    void listKinds()
-      .then((res) => setKinds(res.items))
-      .catch(() => setKinds([]));
-  }, []);
+    setIngestMode(readStoredIngestMode(spaceId));
+  }, [spaceId]);
 
   useEffect(() => {
-    const next = defaultUploadKind(uploadKindOptions);
-    setUploadKind((prev) =>
-      prev && uploadKindOptions.some((k) => k.id === prev)
-        ? prev
-        : (next ?? ""),
-    );
-    setKindFilter((prev) =>
-      prev === "__all__" || uploadKindOptions.some((k) => k.id === prev)
-        ? prev
-        : "__all__",
-    );
-  }, [uploadKindOptions]);
-
-  function onKindFilterChange(value: string) {
-    setKindFilter(value);
-    if (value !== "__all__") setUploadKind(value);
-  }
-
-  useEffect(() => {
-    void listScenarios()
-      .then((res) => setScenarios(res.items))
-      .catch(() => setScenarios([]));
+    void listCatalog()
+      .then((res) => {
+        setScenarios(res.scenarios);
+        setTagGroupsCatalog(res.tag_groups);
+      })
+      .catch(() => {
+        setScenarios([]);
+        setTagGroupsCatalog([]);
+      });
   }, []);
 
   useEffect(() => {
@@ -325,31 +280,53 @@ export default function KnowledgeSpaceDocumentsPage() {
     return () => clearInterval(timer);
   }, [reload]);
 
-  async function onSaveDocMeta() {
-    if (!editDoc) return;
-    setMetaSaving(true);
-    try {
-      const tags =
-        editKind === "policy"
-          ? tagsFromPolicyGroups(editTagGroups)
-          : (editDoc.tags ?? []);
-      await updateDocument(spaceId, editDoc.id, {
-        kind: editKind !== editDoc.kind ? editKind : undefined,
-        tags: editKind === "policy" ? tags : undefined,
-      });
-      setEditDoc(null);
-      await reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setMetaSaving(false);
+  async function waitForDocumentIngest(docId: string, signal?: AbortSignal) {
+    const deadline = Date.now() + 120_000;
+    while (Date.now() < deadline) {
+      if (signal?.aborted) return;
+      await new Promise((r) => setTimeout(r, 1500));
+      if (signal?.aborted) return;
+      const d = await listDocuments(
+        spaceId,
+        DOC_PAGE_SIZE,
+        0,
+        undefined,
+        docListFilters.q,
+      );
+      setDocs(d.items);
+      setDocsTotal(d.total);
+      const row = d.items.find((x) => x.id === docId);
+      if (!row || row.status === "ready" || row.status === "failed") break;
     }
   }
 
-  function openEditDoc(doc: KnowledgeDocument) {
-    setEditDoc(doc);
-    setEditKind(doc.kind);
-    setEditTagGroups(policyGroupsFromTags(doc.tags));
+  function cancelUpload() {
+    uploadAbortRef.current?.abort();
+    uploadAbortRef.current = null;
+    setBusy(false);
+  }
+
+  async function importUploadedFile(
+    file: File,
+    kind: string,
+    title?: string,
+    signal?: AbortSignal,
+  ) {
+    const embedded = await embedDocument(
+      spaceId,
+      file,
+      { kind, title },
+      { signal },
+    );
+    if (embedded.deduped) {
+      setNotice(embedded.message ?? t.knowledge.dedupedNotice);
+      setError(null);
+      await reload();
+      return null;
+    }
+    await reload();
+    await waitForDocumentIngest(embedded.doc_id, signal);
+    return embedded.doc_id;
   }
 
   async function onOpenChunks(doc: KnowledgeDocument) {
@@ -370,41 +347,70 @@ export default function KnowledgeSpaceDocumentsPage() {
     }
   }
 
-  async function onUpload(file: File | null) {
-    if (!file || !effectiveUploadKind) return;
+  async function fileForIngest(
+    file: File,
+    mode: UploadMode,
+    signal?: AbortSignal,
+    segmentPrompt?: string,
+  ): Promise<{ file: File; title?: string; segmentCount?: number }> {
+    if (mode !== "structured") {
+      return { file };
+    }
+    const prompt = resolveSegmentPrompt(segmentPrompt, locale);
+    const parsed = await parseDocument(file, prompt, { signal });
+    const { file: markdownFile, title } = structuredMarkdownFile(
+      parsed.data,
+      file.name,
+    );
+    return {
+      file: markdownFile,
+      title,
+      segmentCount: parsed.data.details?.length ?? 0,
+    };
+  }
+
+  async function onUploadFromDialog({
+    file,
+    ingestMode: mode,
+    prepared,
+  }: UploadInput) {
+    if (!file) return;
+    const kind = importKindForSpace(space, scenarios);
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
+    const { signal } = controller;
     setBusy(true);
     setNotice(null);
     try {
-      const imported = await importDocument(spaceId, file, {
-        kind: effectiveUploadKind,
-      });
-      if (fileRef.current) fileRef.current.value = "";
-      if (imported.deduped) {
-        setNotice(imported.message ?? t.knowledge.dedupedNotice);
-        setError(null);
-        await reload();
-        return;
+      storeIngestMode(spaceId, mode);
+      setIngestMode(mode);
+      let importFile = file;
+      let importTitle: string | undefined;
+      let segmentCount: number | undefined;
+      if (mode === "structured") {
+        if (!prepared) return;
+        importFile = prepared.file;
+        importTitle = prepared.title;
+        segmentCount = prepared.segmentCount;
       }
-      await reload();
-      const docId = imported.doc_id;
-      const deadline = Date.now() + 120_000;
-      while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 1500));
-        const d = await listDocuments(
-          spaceId,
-          DOC_PAGE_SIZE,
-          0,
-          docListFilters.kind,
-          docListFilters.q,
-        );
-        setDocs(d.items);
-        setDocsTotal(d.total);
-        const row = d.items.find((x) => x.id === docId);
-        if (!row || row.status === "ready" || row.status === "failed") break;
+      const docId = await importUploadedFile(
+        importFile,
+        kind,
+        importTitle,
+        signal,
+      );
+      if (signal.aborted) return;
+      if (docId && mode === "structured") {
+        setNotice(t.knowledge.structuredImported(segmentCount ?? 0));
       }
+      setUploadOpen(false);
     } catch (e) {
+      if (signal.aborted) return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      if (uploadAbortRef.current === controller) {
+        uploadAbortRef.current = null;
+      }
       setBusy(false);
     }
   }
@@ -412,7 +418,8 @@ export default function KnowledgeSpaceDocumentsPage() {
   async function onReindex(doc: KnowledgeDocument, file: File) {
     setReindexingId(doc.id);
     try {
-      await reindexDocument(spaceId, doc.id, file);
+      const prepared = await fileForIngest(file, ingestMode);
+      await reindexDocument(spaceId, doc.id, prepared.file);
       await reload();
       const deadline = Date.now() + 120_000;
       while (Date.now() < deadline) {
@@ -421,13 +428,16 @@ export default function KnowledgeSpaceDocumentsPage() {
           spaceId,
           DOC_PAGE_SIZE,
           0,
-          docListFilters.kind,
+          undefined,
           docListFilters.q,
         );
         setDocs(d.items);
         setDocsTotal(d.total);
         const row = d.items.find((x) => x.id === doc.id);
         if (!row || row.status === "ready" || row.status === "failed") break;
+      }
+      if (ingestMode === "structured") {
+        setNotice(t.knowledge.structuredReindexed);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -465,16 +475,9 @@ export default function KnowledgeSpaceDocumentsPage() {
 
   const headerActions = (
     <>
-      <input
-        ref={fileRef}
-        type="file"
-        className="hidden"
-        disabled={busy}
-        onChange={(e) => void onUpload(e.target.files?.[0] ?? null)}
-      />
       <Button
-        disabled={busy || !effectiveUploadKind}
-        onClick={() => fileRef.current?.click()}
+        disabled={busy || !space}
+        onClick={() => setUploadOpen(true)}
         variant="outline"
         size="sm"
         className="h-8 w-24 shrink-0 justify-center px-0"
@@ -493,19 +496,24 @@ export default function KnowledgeSpaceDocumentsPage() {
           {t.knowledge.eval}
         </Link>
       </Button>
+      <Button
+        asChild
+        variant="outline"
+        size="sm"
+        className="h-8 w-24 shrink-0 justify-center px-0"
+      >
+        <Link
+          href={`/workspace/knowledge/scenarios?host=${encodeURIComponent(spaceId)}`}
+        >
+          <TablePropertiesIcon className="size-3.5" />
+          {t.knowledge.catalogButton}
+        </Link>
+      </Button>
     </>
   );
 
   const docsToolbar = (
     <>
-      <KindSelect
-        value={kindFilter}
-        onValueChange={onKindFilterChange}
-        kinds={uploadKindOptions}
-        allLabel={t.knowledge.filterAllKinds}
-        className="h-8 w-full sm:w-44"
-        placeholder={t.knowledge.selectKind}
-      />
       <div className="relative min-w-0 flex-1 sm:w-56 sm:flex-none">
         <SearchIcon className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2" />
         <Input
@@ -589,21 +597,20 @@ export default function KnowledgeSpaceDocumentsPage() {
           }
         >
           {docs.length === 0 ? (
-            <InlineEmpty
-              className="py-10"
-              onClick={
-                kindFilter === "__all__" &&
-                !docListFilters.q &&
-                !busy &&
-                effectiveUploadKind
-                  ? () => fileRef.current?.click()
-                  : undefined
-              }
-            >
-              {kindFilter !== "__all__" || docListFilters.q
-                ? t.knowledge.noMatchingDocs
-                : t.knowledge.emptyDocs}
-            </InlineEmpty>
+            <div className={cn(workspacePageInsetXClass, "py-2 sm:py-2.5")}>
+              <InlineEmpty
+                className="py-10"
+                onClick={
+                  !docListFilters.q && !busy && space
+                    ? () => setUploadOpen(true)
+                    : undefined
+                }
+              >
+                {docListFilters.q
+                  ? t.knowledge.noMatchingDocs
+                  : t.knowledge.emptyDocs}
+              </InlineEmpty>
+            </div>
           ) : (
             <ul className="divide-border divide-y">
               {docs.map((d) => {
@@ -647,22 +654,17 @@ export default function KnowledgeSpaceDocumentsPage() {
                           >
                             {ingestBadgeLabel(d, t.knowledge)}
                           </Badge>,
-                          <Badge
-                            key="kind"
-                            variant="secondary"
-                            className="h-5 px-1.5 text-[10px] font-normal"
-                          >
-                            {kindLabel(d.kind, t.knowledge)}
-                          </Badge>,
-                          ...policyGroupsFromTags(d.tags).map((groupId) => (
-                            <Badge
-                              key={`tag-group-${groupId}`}
-                              variant="secondary"
-                              className="h-5 px-1.5 text-[10px] font-normal"
-                            >
-                              {tagGroupLabel(groupId, t.knowledge)}
-                            </Badge>
-                          )),
+                          ...tagGroupsFromTags(d.tags, tagGroupsCatalog).map(
+                            (groupId) => (
+                              <Badge
+                                key={`tag-group-${groupId}`}
+                                variant="secondary"
+                                className="h-5 px-1.5 text-[10px] font-normal"
+                              >
+                                {tagGroupLabel(groupId, t.knowledge)}
+                              </Badge>
+                            ),
+                          ),
                           showFilename ? (
                             <span key="file" className="truncate">
                               {d.source_filename}
@@ -695,20 +697,6 @@ export default function KnowledgeSpaceDocumentsPage() {
                           )}
                       </div>
                       <div className="flex shrink-0 items-center gap-0.5">
-                        {d.status === "ready" || d.status === "failed" ? (
-                          <Tooltip content={t.common.edit}>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-8 px-2"
-                              disabled={busy || metaSaving}
-                              onClick={() => openEditDoc(d)}
-                            >
-                              <SettingsIcon className="size-3.5" />
-                              {t.common.edit}
-                            </Button>
-                          </Tooltip>
-                        ) : null}
                         {d.status === "failed" || d.status === "ready" ? (
                           <Tooltip content={t.knowledge.reindexTooltip}>
                             <Button
@@ -725,12 +713,18 @@ export default function KnowledgeSpaceDocumentsPage() {
                             </Button>
                           </Tooltip>
                         ) : null}
-                        <Tooltip content={t.knowledge.deleteTooltip}>
+                        <Tooltip
+                          content={
+                            d.status === "processing"
+                              ? t.knowledge.stopProcessingTooltip
+                              : t.knowledge.deleteTooltip
+                          }
+                        >
                           <Button
                             size="sm"
                             variant="ghost"
                             className="h-8 px-2"
-                            disabled={deletingId === d.id || busy}
+                            disabled={deletingId === d.id}
                             onClick={() => setDocToDelete(d)}
                           >
                             <Trash2Icon className="size-3.5" />
@@ -749,138 +743,23 @@ export default function KnowledgeSpaceDocumentsPage() {
         </ItemListPanel>
       </Shell>
 
-      <Dialog
-        open={editDoc != null}
-        onOpenChange={(open) => {
-          if (!open) setEditDoc(null);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t.common.edit}</DialogTitle>
-          </DialogHeader>
-          {uploadKindOptions.length > 0 ? (
-            <div className="flex flex-col gap-1.5">
-              <span className="text-sm font-medium">
-                {t.knowledge.fieldKind}
-              </span>
-              <p className="text-muted-foreground text-sm">
-                {t.knowledge.fieldKindHint}
-              </p>
-              <Select
-                value={editKind}
-                disabled={metaSaving || !editDoc}
-                onValueChange={setEditKind}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {editDoc
-                    ? docKindOptionsFor(editDoc, uploadKindOptions).map((k) => (
-                        <SelectItem key={k.id} value={k.id}>
-                          {kindLabel(k.id, t.knowledge)}
-                        </SelectItem>
-                      ))
-                    : null}
-                </SelectContent>
-              </Select>
-            </div>
-          ) : null}
-          {editKind === "policy" ? (
-            <div className="flex flex-col gap-1.5">
-              <span className="text-sm font-medium">
-                {t.knowledge.editTags}
-              </span>
-              <p className="text-muted-foreground text-sm">
-                {t.knowledge.uploadTagsHint}
-              </p>
-              <div className="flex flex-wrap gap-2 py-1">
-                {POLICY_TAG_GROUPS.map((group) => {
-                  const checked = editTagGroups.includes(group.id);
-                  return (
-                    <label
-                      key={group.id}
-                      className={cn(
-                        "border-input bg-background flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1.5 text-sm",
-                        checked && "border-primary bg-primary/5",
-                      )}
-                    >
-                      <input
-                        type="checkbox"
-                        className="size-3.5 accent-[var(--primary)]"
-                        checked={checked}
-                        disabled={metaSaving}
-                        onChange={() => {
-                          setEditTagGroups((prev) =>
-                            checked
-                              ? prev.filter((id) => id !== group.id)
-                              : [...prev, group.id],
-                          );
-                        }}
-                      />
-                      <span>{tagGroupLabel(group.id, t.knowledge)}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-          ) : null}
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={metaSaving}
-              onClick={() => setEditDoc(null)}
-            >
-              {t.common.cancel}
-            </Button>
-            <Button
-              type="button"
-              disabled={metaSaving}
-              onClick={() => void onSaveDocMeta()}
-            >
-              {metaSaving ? t.common.loading : t.common.save}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
+      <ConfirmDialog
         open={docToDelete != null}
         onOpenChange={(open) => {
           if (!open) setDocToDelete(null);
         }}
-      >
-        <DialogContent showCloseButton={false}>
-          <DialogHeader>
-            <DialogTitle>{t.common.delete}</DialogTitle>
-            <DialogDescription>{t.common.deleteConfirm}</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={deletingId === docToDelete?.id}
-              onClick={() => setDocToDelete(null)}
-            >
-              {t.common.cancel}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={deletingId === docToDelete?.id}
-              onClick={() => {
-                if (docToDelete) void onDelete(docToDelete);
-              }}
-            >
-              {deletingId === docToDelete?.id
-                ? t.common.loading
-                : t.common.delete}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        title={t.common.delete}
+        description={t.common.deleteConfirm}
+        confirmLabel={
+          deletingId === docToDelete?.id ? t.common.loading : t.common.delete
+        }
+        confirmPending={deletingId === docToDelete?.id}
+        confirmVariant="destructive"
+        onConfirm={() => {
+          if (docToDelete) void onDelete(docToDelete);
+        }}
+        onCancel={() => setDocToDelete(null)}
+      />
 
       <Sheet
         open={chunkDoc != null}
@@ -984,6 +863,15 @@ export default function KnowledgeSpaceDocumentsPage() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <UploadDialog
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        defaultIngestMode={ingestMode}
+        busy={busy}
+        onUpload={onUploadFromDialog}
+        onCancelUpload={cancelUpload}
+      />
     </>
   );
 }

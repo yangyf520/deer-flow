@@ -1,5 +1,6 @@
 "use client";
 
+import { Toggle } from "@/components/component";
 import {
   Select,
   SelectContent,
@@ -8,14 +9,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useI18n } from "@/core/i18n/hooks";
+import type { Translations } from "@/core/i18n/locales/types";
 import {
   SPACE_ACCESS_VALUES,
   accessHint,
   accessLabel,
-  kindLabel,
   scenarioLabel,
+  tagGroupLabel,
   type ScenarioPack,
   type SpaceAccessValue,
+  type TagGroupCatalogEntry,
+  type TagGroupId,
 } from "@/core/knowledge";
 import { cn } from "@/lib/utils";
 
@@ -56,13 +60,12 @@ function AccessOption({ value }: { value: SpaceAccessValue }) {
 
 function ScenarioOption({ s }: { s: ScenarioPack }) {
   const { t } = useI18n();
-  const label = scenarioLabel(s.type, t.knowledge);
+  const label = scenarioLabel(s.type, t.knowledge, s);
   return (
     <span className="inline-flex max-w-full min-w-0 items-center gap-2 overflow-hidden">
       <span className="shrink-0">{label}</span>
-      <span className="text-muted-foreground shrink-0 text-xs">{s.type}</span>
-      <span className="text-muted-foreground min-w-0 truncate font-mono text-[11px] tabular-nums">
-        k={s.top_k ?? "—"} · s={s.score ?? "—"}
+      <span className="text-muted-foreground shrink-0 font-mono text-xs">
+        {s.type}
       </span>
     </span>
   );
@@ -184,50 +187,86 @@ export function ScenarioSelect({
   );
 }
 
-type KindSelectProps = {
-  value: string;
-  onValueChange: (value: string) => void;
-  kinds: Array<{ id: string }>;
-  allValue?: string;
-  allLabel: string;
-  showId?: boolean;
+export type UploadMode = "unstructured" | "structured";
+
+export function uploadModeToggleItems(knowledge: Translations["knowledge"]) {
+  return [
+    {
+      value: "unstructured",
+      label: knowledge.uploadModeUnstructured,
+    },
+    {
+      value: "structured",
+      label: knowledge.uploadModeStructured,
+    },
+  ];
+}
+
+type UploadModeToggleProps = {
+  value: UploadMode;
+  onValueChange: (value: UploadMode) => void;
   disabled?: boolean;
   className?: string;
-  placeholder?: string;
-  size?: "sm" | "default";
+  scrollable?: boolean;
 };
 
-export function KindSelect({
+export function UploadModeToggle({
   value,
   onValueChange,
-  kinds,
-  allValue = "__all__",
-  allLabel,
-  showId = false,
   disabled,
   className,
-  placeholder,
-  size = "sm",
-}: KindSelectProps) {
+  scrollable = true,
+}: UploadModeToggleProps) {
   const { t } = useI18n();
   return (
-    <Select value={value} disabled={disabled} onValueChange={onValueChange}>
-      <SelectTrigger size={size} className={cn(className)}>
-        <SelectValue placeholder={placeholder} />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={allValue}>{allLabel}</SelectItem>
-        {kinds.map((k) => (
-          <SelectItem key={k.id} value={k.id}>
-            {kindLabel(k.id, t.knowledge)}
-            {showId ? (
-              <span className="text-muted-foreground ml-2 font-mono text-[10px]">
-                {k.id}
-              </span>
-            ) : null}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <Toggle
+      value={value}
+      onValueChange={(next) => onValueChange(next as UploadMode)}
+      items={uploadModeToggleItems(t.knowledge)}
+      disabled={disabled}
+      scrollable={scrollable}
+      className={className}
+    />
+  );
+}
+
+export function policyTagToggleItems(
+  knowledge: Translations["knowledge"],
+  tagGroups: TagGroupCatalogEntry[],
+) {
+  return tagGroups.map((group) => ({
+    value: group.id,
+    label: tagGroupLabel(group.id, knowledge, group),
+  }));
+}
+
+type PolicyTagToggleProps = {
+  value: TagGroupId[];
+  onValueChange: (value: TagGroupId[]) => void;
+  tagGroups: TagGroupCatalogEntry[];
+  disabled?: boolean;
+  className?: string;
+  scrollable?: boolean;
+};
+
+export function PolicyTagToggle({
+  value,
+  onValueChange,
+  tagGroups,
+  disabled,
+  className,
+  scrollable = true,
+}: PolicyTagToggleProps) {
+  const { t } = useI18n();
+  return (
+    <Toggle
+      type="multiple"
+      value={value}
+      onValueChange={(next) => onValueChange(next)}
+      items={policyTagToggleItems(t.knowledge, tagGroups)}
+      disabled={disabled}
+      scrollable={scrollable}
+      className={className}
+    />
   );
 }

@@ -54,6 +54,12 @@ export const panelClass = "workspace-panel border-0 bg-transparent shadow-none";
 export const headerButtonClass =
   "h-7 min-h-7 shrink-0 gap-1 rounded-md border-border/70 bg-transparent px-2.5 text-xs leading-none shadow-none hover:bg-muted/40 sm:px-3";
 
+/** Paired header actions (e.g. catalog + create) — equal width and height. */
+export const headerPairedActionButtonClass = cn(
+  headerButtonClass,
+  "min-w-[5.25rem] justify-center sm:min-w-[5.5rem]",
+);
+
 export const dialogInlineButtonClass =
   "h-8 min-h-8 shrink-0 gap-1 rounded-md border-border/70 bg-transparent px-2.5 text-xs leading-none shadow-xs hover:bg-muted/40";
 

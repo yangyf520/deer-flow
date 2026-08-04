@@ -36,6 +36,7 @@ export {
 } from "./dialogs";
 export type {
   FormDialogEditResourceMeta,
+  FormDialogMetaRow,
   FormDialogLeadingDestructive,
 } from "./dialogs";
 export { FormSelect, type FormSelectOption } from "./select";

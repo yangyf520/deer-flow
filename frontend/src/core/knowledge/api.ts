@@ -1,5 +1,7 @@
 import { fetch } from "../api/fetcher";
 import { getBackendBaseURL } from "../config";
+import { DEFAULT_LOCALE, normalizeLocale } from "../i18n";
+import { getLocaleFromCookie } from "../i18n/cookies";
 
 export const SPACE_ACCESS_VALUES = ["open", "members", "private"] as const;
 export type SpaceAccessValue = (typeof SPACE_ACCESS_VALUES)[number];
@@ -23,18 +25,32 @@ export type Space = {
   scenario?: string | null;
   default_scenarios: string[];
   knowledge_version?: string;
+  top_k?: number | null;
+  score?: number | null;
   my_role?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
 
+export type ScenarioLane = {
+  id?: string;
+  kinds?: string[];
+  tags?: string[];
+  budget?: number | null;
+  optional?: boolean;
+};
+
 export type ScenarioPack = {
   description?: string;
   type: string;
-  top_k?: number | null;
-  score?: number | null;
+  label?: string;
+  /** Linked knowledge space id (defaults to scenario type). */
+  space_id?: string;
+  /** Knowledge space that owns this catalog entry. */
+  host_space_id?: string;
   /** Kind ids from scenario lanes; empty = single-path retrieve. */
   kinds?: string[];
+  lanes?: ScenarioLane[];
 };
 
 export type ScenariosListResponse = {
@@ -44,11 +60,43 @@ export type ScenariosListResponse = {
 
 export type KnowledgeKind = {
   id: string;
+  label?: string;
 };
 
 export type KindsListResponse = {
   items: KnowledgeKind[];
   total: number;
+};
+
+export type KnowledgeTag = {
+  id: string;
+  label?: string;
+  scenario?: string;
+};
+
+export type KnowledgeTagGroup = {
+  id: string;
+  label?: string;
+  tags: string[];
+  scenario?: string;
+};
+
+export type KnowledgeCatalogResponse = {
+  kinds: KnowledgeKind[];
+  tags: KnowledgeTag[];
+  tag_groups: KnowledgeTagGroup[];
+  scenarios: ScenarioPack[];
+};
+
+export type ScenarioDefinitionInput = {
+  code: string;
+  label: string;
+  description?: string;
+  merge_mode?: string;
+  fusion_num_queries?: number | null;
+  kinds?: string[];
+  lanes?: ScenarioLane[];
+  host_space_id?: string;
 };
 
 export type SpacesListResponse = {
@@ -129,6 +177,15 @@ export type EvidencePackResponse = {
 
 const base = () => `${getBackendBaseURL()}/api/knowledge/v1`;
 
+function withLocale(init?: RequestInit): RequestInit {
+  const locale = normalizeLocale(getLocaleFromCookie() ?? DEFAULT_LOCALE);
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Accept-Language")) {
+    headers.set("Accept-Language", locale);
+  }
+  return { ...init, headers };
+}
+
 async function readJson<T>(res: Response, fallback: string): Promise<T> {
   if (!res.ok) {
     let detail = fallback;
@@ -151,13 +208,57 @@ async function readJson<T>(res: Response, fallback: string): Promise<T> {
 }
 
 export async function listScenarios(): Promise<ScenariosListResponse> {
-  const res = await fetch(`${base()}/scenarios`);
+  const res = await fetch(`${base()}/scenarios`, withLocale());
   return readJson(res, "Failed to list scenarios");
 }
 
 export async function listKinds(): Promise<KindsListResponse> {
-  const res = await fetch(`${base()}/kinds`);
+  const res = await fetch(`${base()}/kinds`, withLocale());
   return readJson(res, "Failed to list kinds");
+}
+
+export async function listCatalog(): Promise<KnowledgeCatalogResponse> {
+  const res = await fetch(`${base()}/catalog`, withLocale());
+  return readJson(res, "Failed to load knowledge catalog");
+}
+
+export async function migrateCatalogHost(hostSpaceId: string): Promise<{
+  host_space_id: string;
+  updated: number;
+}> {
+  const res = await fetch(
+    `${base()}/catalog/migrate-host`,
+    withLocale({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ host_space_id: hostSpaceId }),
+    }),
+  );
+  return readJson(res, "Failed to migrate catalog host");
+}
+
+export async function upsertScenario(
+  code: string,
+  input: ScenarioDefinitionInput,
+): Promise<ScenarioPack> {
+  const res = await fetch(
+    `${base()}/scenarios/${encodeURIComponent(code)}`,
+    withLocale({
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
+  return readJson(res, "Failed to save scenario");
+}
+
+export async function deleteScenario(code: string): Promise<void> {
+  const res = await fetch(`${base()}/scenarios/${encodeURIComponent(code)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    await readJson(res, "Failed to delete scenario");
+  }
 }
 
 export async function listMySpaces(): Promise<SpacesListResponse> {
@@ -170,8 +271,10 @@ export async function createSpace(input: {
   description?: string;
   access?: string;
   id?: string;
-  scenario: string;
+  scenario?: string;
   allowed_kinds?: string[];
+  top_k?: number;
+  score?: number;
 }): Promise<Space> {
   const res = await fetch(`${base()}/spaces`, {
     method: "POST",
@@ -190,6 +293,8 @@ export async function updateSpace(
     access?: string;
     allowed_kinds?: string[];
     knowledge_version?: string;
+    top_k?: number;
+    score?: number;
   },
 ): Promise<Space> {
   const res = await fetch(`${base()}/spaces/${encodeURIComponent(spaceId)}`, {
@@ -198,6 +303,14 @@ export async function updateSpace(
     body: JSON.stringify(input),
   });
   return readJson(res, "Failed to update space");
+}
+
+export async function deleteSpace(spaceId: string): Promise<void> {
+  const res = await fetch(`${base()}/spaces/${encodeURIComponent(spaceId)}`, {
+    method: "DELETE",
+  });
+  if (res.status === 204 || res.ok) return;
+  await readJson(res, "Failed to delete space");
 }
 
 export async function getSpace(spaceId: string): Promise<Space> {
@@ -263,28 +376,6 @@ export async function listDocuments(
     `${base()}/spaces/${encodeURIComponent(spaceId)}/documents?${params.toString()}`,
   );
   return readJson(res, "Failed to list documents");
-}
-
-export async function importDocument(
-  spaceId: string,
-  file: File,
-  opts: { kind: string; title?: string; tags?: string[] },
-): Promise<DocumentImportResponse> {
-  const form = new FormData();
-  form.append("file", file);
-  form.append("kind", opts.kind);
-  if (opts.title) form.append("title", opts.title);
-  for (const tag of opts.tags ?? []) {
-    if (tag.trim()) form.append("tags", tag.trim());
-  }
-  const res = await fetch(
-    `${base()}/spaces/${encodeURIComponent(spaceId)}/documents/import`,
-    {
-      method: "POST",
-      body: form,
-    },
-  );
-  return readJson(res, "Failed to import document");
 }
 
 export async function updateDocument(

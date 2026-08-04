@@ -222,7 +222,7 @@ export function DialogShell({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  title: string;
+  title: ReactNode;
   description?: ReactNode;
   children?: ReactNode;
   footer?: ReactNode;
@@ -373,6 +373,13 @@ export function DialogSlotField({
 export type FormDialogEditResourceMeta = {
   creator?: string;
   createdAt?: string;
+  rows?: FormDialogMetaRow[];
+};
+
+export type FormDialogMetaRow = {
+  label: string;
+  value: string;
+  tabular?: boolean;
 };
 
 export function buildFormDialogEditResourceMeta(
@@ -381,6 +388,7 @@ export function buildFormDialogEditResourceMeta(
         user_id?: string | null;
         created_at?: string | null;
         created_by?: string | null;
+        created_by_name?: string | null;
       }
     | null
     | undefined,
@@ -391,9 +399,14 @@ export function buildFormDialogEditResourceMeta(
     return undefined;
   }
   let creator: string | undefined;
-  const trimmedCreatedBy = record.created_by?.trim();
-  if (trimmedCreatedBy) {
-    creator = trimmedCreatedBy;
+  const trimmedName = record.created_by_name?.trim();
+  if (trimmedName) {
+    creator = trimmedName;
+  } else {
+    const trimmedCreatedBy = record.created_by?.trim();
+    if (trimmedCreatedBy) {
+      creator = trimmedCreatedBy;
+    }
   }
   if (!creator && viewer?.email && record.user_id === viewer.id) {
     const email = viewer.email.trim();
@@ -412,35 +425,40 @@ export function DialogResourceMetaSection({
   createdAtLabel,
   creator,
   createdAt,
+  rows = [],
 }: {
   title: string;
   creatorLabel: string;
   createdAtLabel: string;
   creator?: string | null;
   createdAt?: string | null;
+  rows?: FormDialogMetaRow[];
 }) {
   const showCreator = Boolean(creator?.trim());
   const showCreatedAt = Boolean(createdAt?.trim());
-  if (!showCreator && !showCreatedAt) {
+  const extraRows = rows.filter((row) => row.value.trim());
+  if (!showCreator && !showCreatedAt && extraRows.length === 0) {
     return null;
   }
 
-  const rows: { label: string; value: string; tabular?: boolean }[] = [];
-  if (showCreator) {
-    rows.push({ label: creatorLabel, value: creator!.trim() });
-  }
-  if (showCreatedAt) {
-    rows.push({
-      label: createdAtLabel,
-      value: createdAt!.trim(),
-      tabular: true,
-    });
-  }
+  const metaRows: FormDialogMetaRow[] = [
+    ...extraRows,
+    ...(showCreator ? [{ label: creatorLabel, value: creator!.trim() }] : []),
+    ...(showCreatedAt
+      ? [
+          {
+            label: createdAtLabel,
+            value: createdAt!.trim(),
+            tabular: true,
+          },
+        ]
+      : []),
+  ];
 
   return (
     <DialogFormSection title={title}>
       <DialogFieldGrid>
-        {rows.map((row) => (
+        {metaRows.map((row) => (
           <FormField key={row.label} label={row.label} className="min-w-0">
             <div
               className={cn(readOnlyFieldClass, row.tabular && "tabular-nums")}
@@ -830,7 +848,7 @@ export function FormDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  title: string;
+  title: ReactNode;
   description?: ReactNode;
   children?: ReactNode;
   cancelLabel?: string;
@@ -889,6 +907,7 @@ export function FormDialog({
               createdAtLabel={metaLabels.createdAt}
               creator={editResourceMeta.creator}
               createdAt={editResourceMeta.createdAt}
+              rows={editResourceMeta.rows}
             />
           ) : null}
         </div>

@@ -44,7 +44,7 @@ export function ItemListPanel({
   footer,
   className,
 }: {
-  title: ReactNode;
+  title?: ReactNode;
   countLabel?: ReactNode;
   toolbar?: ReactNode;
   children: ReactNode;
@@ -66,9 +66,11 @@ export function ItemListPanel({
         )}
       >
         <div className="flex min-w-0 shrink items-baseline gap-2">
-          <h2 className="text-xs font-semibold tracking-tight sm:text-sm sm:font-medium">
-            {title}
-          </h2>
+          {title != null && title !== "" ? (
+            <h2 className="text-xs font-semibold tracking-tight sm:text-sm sm:font-medium">
+              {title}
+            </h2>
+          ) : null}
           {countLabel != null ? (
             <span className="text-muted-foreground text-[11px] tabular-nums sm:text-xs">
               {countLabel}
