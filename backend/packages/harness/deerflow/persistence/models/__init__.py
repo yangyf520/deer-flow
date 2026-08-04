@@ -28,6 +28,7 @@ from deerflow.persistence.knowledge.model import (
     KnowledgeSpaceRow,
 )
 from deerflow.persistence.models.run_event import RunEventRow
+from deerflow.persistence.pub_codes.model import PubCodeRow
 from deerflow.persistence.run.model import RunRow
 from deerflow.persistence.scheduled_task_runs.model import ScheduledTaskRunRow
 from deerflow.persistence.scheduled_tasks.model import ScheduledTaskRow
@@ -45,6 +46,7 @@ __all__ = [
     "KnowledgeDocumentRow",
     "KnowledgeGrantRow",
     "KnowledgeSpaceRow",
+    "PubCodeRow",
     "RunEventRow",
     "RunRow",
     "ScheduledTaskRow",

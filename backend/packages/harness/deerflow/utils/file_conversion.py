@@ -64,6 +64,46 @@ def parse_docling(source: Any) -> ParseResult:
         return ParseResult(text="", parse_quality="failed", error=str(exc))
 
 
+def parse_markitdown_bytes(data: bytes, filename: str) -> ParseResult:
+    """Parse document bytes via MarkItDown (fallback when Docling is unavailable)."""
+    import tempfile
+
+    try:
+        from markitdown import MarkItDown
+    except ImportError:
+        return ParseResult(text="", parse_quality="failed", error="MarkItDown is not installed")
+
+    suffix = Path(filename).suffix or ".bin"
+    path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(data)
+            path = Path(tmp.name)
+        text = (MarkItDown().convert(str(path)).text_content or "").strip()
+        if not text:
+            return ParseResult(text="", parse_quality="failed", error="empty MarkItDown output")
+        return ParseResult(text=text, parse_quality="ok")
+    except Exception as exc:
+        logger.warning("MarkItDown parse failed for %s: %s", filename, exc)
+        return ParseResult(text="", parse_quality="failed", error=str(exc))
+    finally:
+        if path is not None:
+            path.unlink(missing_ok=True)
+
+
+def parse_file_bytes_with_fallback(data: bytes, filename: str) -> tuple[ParseResult, str]:
+    """Parse bytes via Docling, falling back to MarkItDown when Docling is missing or fails."""
+    parsed = parse_file_bytes(data, filename)
+    if parsed.parse_quality == "ok" and (parsed.text or "").strip():
+        return parsed, "docling"
+    logger.info(
+        "Docling unavailable for %s (%s); falling back to MarkItDown",
+        filename,
+        parsed.error,
+    )
+    return parse_markitdown_bytes(data, filename), "markitdown"
+
+
 def parse_file_bytes(data: bytes, filename: str) -> ParseResult:
     """Parse document bytes via Docling ``DocumentStream`` (no temp file)."""
     try:

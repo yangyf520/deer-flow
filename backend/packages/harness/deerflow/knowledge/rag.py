@@ -1173,15 +1173,21 @@ class ResolvedLane:
 
 
 def get_scenario_config(scenario_id: str | None) -> KnowledgeScenarioConfig:
+    from deerflow.knowledge.catalog import cached_scenario, default_scenario_code
+
+    fallback = default_scenario_code()
+    sid = (scenario_id or "").strip() or fallback
+    cached = cached_scenario(sid)
+    if cached is not None:
+        return cached
     cfg = get_knowledge_config()
-    sid = (scenario_id or "").strip() or "general-qa"
     item = cfg.scenario_by_type(sid)
     if item is None:
-        item = cfg.scenario_by_type("general-qa")
+        item = cfg.scenario_by_type(fallback)
     if item is None and cfg.scenarios:
         item = cfg.scenarios[0]
     if item is None:
-        item = KnowledgeScenarioConfig(type="general-qa", top_k=8, score=0.35)
+        item = KnowledgeScenarioConfig(type=fallback)
     return item
 
 
@@ -1347,12 +1353,14 @@ def resolve_scenario(
     request_scenario: str | None,
     space_default_scenarios: list[str] | None = None,
 ) -> ScenarioPack:
+    from deerflow.knowledge.catalog import default_scenario_code
+
     if request_scenario and request_scenario.strip():
         return get_scenario_pack(request_scenario)
     defaults = list(space_default_scenarios or [])
     if defaults:
         return get_scenario_pack(defaults[0])
-    return get_scenario_pack("general-qa")
+    return get_scenario_pack(default_scenario_code())
 
 
 def _build_retriever(*, space_id: str, retrieve_n: int, num_queries: int):

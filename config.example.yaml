@@ -1812,6 +1812,20 @@ database:
 #           budget: 2
 #         - kinds: [case]
 #           budget: 3
+#   # Optional global code catalog (machine ids; UI labels in frontend i18n).
+#   kinds:
+#     - policy
+#     - reference
+#     - case
+#   tags:
+#     - statute
+#     - national-law
+#     - company-policy
+#   tag_groups:
+#     - id: national
+#       tags: [statute, national-law]
+#     - id: company
+#       tags: [company-policy]
 
 # ============================================================================
 # Run Events Configuration

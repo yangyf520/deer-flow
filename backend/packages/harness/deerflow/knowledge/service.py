@@ -42,7 +42,7 @@ from deerflow.persistence.knowledge.model import (
     KnowledgeSpaceRow,
 )
 from deerflow.persistence.user.model import UserRow
-from deerflow.utils.file_conversion import ParseResult, parse_file_bytes
+from deerflow.utils.file_conversion import ParseResult, parse_file_bytes_with_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +142,8 @@ class SpaceCreateRequest(BaseModel):
     access: str = "open"
     allowed_kinds: list[str] = Field(default_factory=list)
     scenario: str | None = Field(default=None, description="Bound scenarios[].type from config")
+    top_k: int | None = Field(default=None, ge=1, le=50)
+    score: float | None = Field(default=None, ge=0.0, le=1.0)
     # Legacy alias → normalized into scenario
     default_scenarios: list[str] = Field(default_factory=list)
 
@@ -161,6 +163,29 @@ def set_space_knowledge_version(space: Any, version: str) -> None:
     space.attrs = attrs
 
 
+def space_retrieval_from_row(row: Any) -> tuple[int | None, float | None]:
+    attrs = row.attrs if isinstance(getattr(row, "attrs", None), dict) else {}
+    top_k = attrs.get("top_k")
+    score = attrs.get("score")
+    return (
+        int(top_k) if top_k is not None else None,
+        float(score) if score is not None else None,
+    )
+
+
+def apply_space_retrieval_attrs(space: Any, *, top_k: int | None, score: float | None) -> None:
+    attrs = dict(space.attrs) if isinstance(getattr(space, "attrs", None), dict) else {}
+    if top_k is not None:
+        attrs["top_k"] = int(top_k)
+    else:
+        attrs.pop("top_k", None)
+    if score is not None:
+        attrs["score"] = float(score)
+    else:
+        attrs.pop("score", None)
+    space.attrs = attrs
+
+
 class SpaceUpdateRequest(BaseModel):
     name: str | None = None
     description: str | None = None
@@ -169,6 +194,8 @@ class SpaceUpdateRequest(BaseModel):
     scenario: str | None = None
     default_scenarios: list[str] | None = None
     knowledge_version: str | None = Field(default=None, description="Published version label for retrieval")
+    top_k: int | None = Field(default=None, ge=1, le=50)
+    score: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class SpaceResponse(BaseModel):
@@ -181,6 +208,8 @@ class SpaceResponse(BaseModel):
     scenario: str | None = None
     default_scenarios: list[str] = Field(default_factory=list)
     knowledge_version: str = "current"
+    top_k: int | None = None
+    score: float | None = None
     my_role: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
@@ -214,13 +243,23 @@ class SpaceGrantsListResponse(BaseModel):
     total: int
 
 
+class ScenarioLaneResponse(BaseModel):
+    id: str = ""
+    kinds: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    budget: int | None = None
+    optional: bool = False
+
+
 class ScenarioPackResponse(BaseModel):
     description: str = ""
     type: str
-    top_k: int | None = None
-    score: float | None = None
+    label: str = ""
+    space_id: str = ""
+    host_space_id: str = ""
     # From scenario lanes / shorthand; empty → single-path retrieve (no parallel lanes).
     kinds: list[str] = Field(default_factory=list)
+    lanes: list[ScenarioLaneResponse] = Field(default_factory=list)
 
 
 class ScenariosListResponse(BaseModel):
@@ -228,13 +267,144 @@ class ScenariosListResponse(BaseModel):
     total: int
 
 
+class ScenarioDefinitionRequest(BaseModel):
+    """Create/update a knowledge scenario in pub_codes."""
+
+    code: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    labels: dict[str, str] | None = None
+    description: str = ""
+    merge_mode: str = "slot_then_rrf"
+    fusion_num_queries: int | None = None
+    kinds: list[str] = Field(default_factory=list)
+    lanes: list[ScenarioLaneResponse] = Field(default_factory=list)
+    host_space_id: str | None = None
+
+
+class MigrateCatalogHostRequest(BaseModel):
+    host_space_id: str = Field(min_length=1)
+
+
+class MigrateCatalogHostResponse(BaseModel):
+    host_space_id: str
+    updated: int
+
+
 class KnowledgeKindResponse(BaseModel):
     id: str
+    label: str = ""
 
 
 class KindsListResponse(BaseModel):
     items: list[KnowledgeKindResponse]
     total: int
+
+
+class KnowledgeTagResponse(BaseModel):
+    id: str
+    label: str = ""
+    scenario: str = ""
+
+
+class KnowledgeTagGroupResponse(BaseModel):
+    id: str
+    label: str = ""
+    tags: list[str] = Field(default_factory=list)
+    scenario: str = ""
+
+
+class KnowledgeCatalogResponse(BaseModel):
+    """Knowledge code catalog from DB (pub_codes); labels stored server-side."""
+
+    kinds: list[KnowledgeKindResponse] = Field(default_factory=list)
+    tags: list[KnowledgeTagResponse] = Field(default_factory=list)
+    tag_groups: list[KnowledgeTagGroupResponse] = Field(default_factory=list)
+    scenarios: list[ScenarioPackResponse] = Field(default_factory=list)
+
+
+async def get_knowledge_catalog_from_db(session: AsyncSession, *, locale: str = "zh-CN") -> KnowledgeCatalogResponse:
+    from deerflow.knowledge.catalog import get_catalog
+
+    raw = await get_catalog(session, locale=locale)
+    return KnowledgeCatalogResponse.model_validate(raw)
+
+
+def scenario_to_response(scenario) -> ScenarioPackResponse:
+    from deerflow.config.knowledge_config import KnowledgeScenarioConfig
+    from deerflow.knowledge.rag import scenario_kind_ids
+
+    s: KnowledgeScenarioConfig = scenario
+    return ScenarioPackResponse(
+        description=s.description,
+        type=s.type,
+        kinds=scenario_kind_ids(s),
+        lanes=[
+            ScenarioLaneResponse(
+                id=lane.id,
+                kinds=[k for k in (lane.kinds or []) if k],
+                tags=[t for t in (lane.tags or []) if t],
+                budget=lane.budget,
+                optional=bool(lane.optional),
+            )
+            for lane in (s.lanes or [])
+        ],
+    )
+
+
+def list_configured_tags() -> list[KnowledgeTagResponse]:
+    """Tag ids: explicit YAML catalog, else union of tag_groups and scenario lane tags."""
+    cfg = get_knowledge_config()
+    seen: list[str] = []
+
+    def add(tid: str) -> None:
+        if tid and tid not in seen:
+            seen.append(tid)
+
+    for item in cfg.tags:
+        add(item.id)
+    for group in cfg.tag_groups:
+        for tag in group.tags:
+            add(tag)
+    if not seen:
+        for group in list_configured_tag_groups():
+            for tag in group.tags:
+                add(tag)
+        for scenario in cfg.scenarios:
+            for lane in scenario.lanes or []:
+                for tag in lane.tags or []:
+                    add(str(tag))
+    return [KnowledgeTagResponse(id=tid) for tid in seen]
+
+
+def list_configured_tag_groups() -> list[KnowledgeTagGroupResponse]:
+    """Tag group bundles for UI toggles; explicit YAML, else derive from lane tag sets."""
+    cfg = get_knowledge_config()
+    if cfg.tag_groups:
+        return [KnowledgeTagGroupResponse(id=g.id, tags=[t for t in g.tags if t]) for g in cfg.tag_groups if g.id]
+
+    seen: dict[tuple[str, ...], str] = {}
+    out: list[KnowledgeTagGroupResponse] = []
+    for scenario in cfg.scenarios:
+        for index, lane in enumerate(scenario.lanes or []):
+            tags = tuple(sorted(t for t in (lane.tags or []) if t))
+            if not tags:
+                continue
+            if tags in seen:
+                continue
+            lid = (lane.id or "").strip() or f"lane-{index}"
+            seen[tags] = lid
+            out.append(KnowledgeTagGroupResponse(id=lid, tags=list(tags)))
+    return out
+
+
+def get_knowledge_catalog() -> KnowledgeCatalogResponse:
+    cfg = get_knowledge_config()
+    return KnowledgeCatalogResponse(
+        kinds=list_configured_kinds(),
+        tags=list_configured_tags(),
+        tag_groups=list_configured_tag_groups(),
+        scenarios=[scenario_to_response(s) for s in cfg.scenarios],
+    )
 
 
 def list_configured_kinds() -> list[KnowledgeKindResponse]:
@@ -505,12 +675,22 @@ def _resolve_search_space_ids(spaces: list[str] | None, allowed_ids: set[str]) -
 
 
 def _resolve_bound_scenario(scenario: str | None, default_scenarios: list[str] | None = None) -> str:
-    """Pick a single config scenarios[].type; validate against KnowledgeConfig."""
+    """Legacy sync validate — prefer ``resolve_bound_scenario`` with a DB session."""
+    from deerflow.knowledge.catalog import cached_scenario_codes
+
     raw = (scenario or "").strip()
     if not raw and default_scenarios:
         raw = str(default_scenarios[0] or "").strip()
     if not raw:
-        raise HTTPException(status_code=422, detail="scenario is required (config scenarios[].type)")
+        raise HTTPException(status_code=422, detail="scenario is required (knowledge scenario code)")
+    cached = cached_scenario_codes()
+    if cached:
+        if raw not in cached:
+            raise HTTPException(
+                status_code=422,
+                detail=f"unknown scenario type {raw!r}; configured: {sorted(cached)}",
+            )
+        return raw
     cfg = get_knowledge_config().scenario_by_type(raw)
     if cfg is None:
         known = [s.type for s in get_knowledge_config().scenarios]
@@ -521,14 +701,31 @@ def _resolve_bound_scenario(scenario: str | None, default_scenarios: list[str] |
     return raw
 
 
-def allowed_kinds_for_scenario(scenario_type: str, requested: list[str] | None = None) -> list[str]:
-    """Whitelist for a space: subset of scenario lane kinds (default = all scenario kinds).
+async def resolve_bound_scenario(
+    session: AsyncSession,
+    scenario: str | None,
+    default_scenarios: list[str] | None = None,
+) -> str:
+    from deerflow.knowledge.catalog import validate_scenario_code
 
-    Scenarios without lanes/kinds return ``[]`` (no kind filter; single-path retrieve).
-    """
+    raw = (scenario or "").strip()
+    if not raw and default_scenarios:
+        raw = str(default_scenarios[0] or "").strip()
+    return await validate_scenario_code(session, raw)
+
+
+def allowed_kinds_for_scenario(scenario_type: str, requested: list[str] | None = None) -> list[str]:
+    """Whitelist for a space: subset of scenario lane kinds (default = all scenario kinds)."""
+    from deerflow.knowledge.catalog import cached_scenario
+    from deerflow.knowledge.rag import scenario_kind_ids
+
     cfg = get_knowledge_config()
-    item = cfg.scenario_by_type(scenario_type)
-    scenario_kinds = scenario_kind_ids(item) if item is not None else []
+    cached = cached_scenario(scenario_type)
+    if cached is not None:
+        scenario_kinds = scenario_kind_ids(cached)
+    else:
+        item = cfg.scenario_by_type(scenario_type)
+        scenario_kinds = scenario_kind_ids(item) if item is not None else []
     want = [k for k in (requested or []) if k]
     if not want:
         return list(scenario_kinds)
@@ -552,6 +749,7 @@ def allowed_kinds_for_scenario(scenario_type: str, requested: list[str] | None =
 def space_to_response(row: KnowledgeSpaceRow, my_role: str | None = None) -> SpaceResponse:
     scenarios = list(row.default_scenarios or [])
     bound = scenarios[0] if scenarios else None
+    top_k, score = space_retrieval_from_row(row)
     return SpaceResponse(
         id=row.id,
         name=row.name,
@@ -562,6 +760,8 @@ def space_to_response(row: KnowledgeSpaceRow, my_role: str | None = None) -> Spa
         scenario=bound,
         default_scenarios=scenarios,
         knowledge_version=space_knowledge_version(row),
+        top_k=top_k,
+        score=score,
         my_role=my_role,
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
@@ -672,10 +872,29 @@ async def create_space(
     scenario: str | None = None,
     default_scenarios: list[str] | None = None,
     space_id: str | None = None,
+    top_k: int | None = None,
+    score: float | None = None,
 ) -> SpaceResponse:
 
-    bound = _resolve_bound_scenario(scenario, default_scenarios)
-    kinds = allowed_kinds_for_scenario(bound, allowed_kinds)
+    raw_scenario = (scenario or "").strip()
+    legacy = default_scenarios or []
+    if raw_scenario or legacy:
+        bound = await resolve_bound_scenario(session, scenario, default_scenarios)
+        kinds = allowed_kinds_for_scenario(bound, allowed_kinds)
+        scenarios_list = [bound]
+    else:
+        scenarios_list = []
+        cfg = get_knowledge_config()
+        want = [k for k in (allowed_kinds or []) if k]
+        catalog = cfg.configured_kind_ids()
+        if want:
+            if catalog:
+                unknown = [k for k in want if k not in catalog]
+                if unknown:
+                    raise HTTPException(status_code=422, detail=f"unknown kind(s): {unknown}")
+            kinds = want
+        else:
+            kinds = list(catalog) if catalog else []
 
     base_id = (space_id or "").strip() or _slugify_space_id(name)
     candidate = base_id
@@ -696,14 +915,91 @@ async def create_space(
         access=access if access in ("open", "members", "private") else "open",
         owner_user_id=user_id,
         allowed_kinds=kinds,
-        default_scenarios=[bound],
+        default_scenarios=scenarios_list,
         created_at=now,
         updated_at=now,
     )
+    apply_space_retrieval_attrs(row, top_k=top_k, score=score)
     session.add(row)
     await session.commit()
     await session.refresh(row)
     return space_to_response(row, my_role="admin")
+
+
+async def ensure_catalog_scenario_space(
+    session: AsyncSession,
+    *,
+    user_id: str,
+    scenario_code: str,
+    label: str,
+    space_id: str | None = None,
+) -> str:
+    """Ensure a knowledge space exists for a catalog scenario (1:1 by default)."""
+    from deerflow.persistence.knowledge.model import KnowledgeSpaceRow
+
+    sid = (scenario_code or "").strip()
+    if not sid:
+        raise HTTPException(status_code=422, detail="scenario code is required")
+    linked_id = (space_id or sid).strip() or sid
+    display = (label or sid).strip() or sid
+    existing = await session.get(KnowledgeSpaceRow, linked_id)
+    if existing is None:
+        await create_space(
+            session,
+            user_id=user_id,
+            name=display,
+            description=None,
+            access="open",
+            allowed_kinds=[],
+            scenario=sid,
+            space_id=linked_id,
+            top_k=8,
+            score=0.35,
+        )
+        return linked_id
+    existing.name = display
+    existing.default_scenarios = [sid]
+    existing.updated_at = _now()
+    await session.commit()
+    return linked_id
+
+
+async def delete_scenario_cascade(
+    session: AsyncSession,
+    *,
+    user_id: str,
+    system_role: str,
+    code: str,
+) -> bool:
+    """Delete catalog scenario and its linked knowledge space."""
+    from deerflow.knowledge.catalog import delete_scenario as delete_scenario_row
+    from deerflow.persistence.knowledge.model import KnowledgeSpaceRow
+
+    deleted, space_id = await delete_scenario_row(session, code)
+    if not deleted:
+        return False
+    if not space_id:
+        return True
+    space = await session.get(KnowledgeSpaceRow, space_id)
+    if space is None:
+        return True
+    try:
+        await delete_space(
+            session,
+            space_id=space_id,
+            user_id=user_id,
+            system_role=system_role,
+        )
+    except HTTPException as exc:
+        if exc.status_code not in (403, 404):
+            raise
+        logger.warning(
+            "catalog scenario %s deleted but space %s was not removed: %s",
+            code,
+            space_id,
+            exc.detail,
+        )
+    return True
 
 
 async def update_space(
@@ -729,17 +1025,24 @@ async def update_space(
     if body.access is not None:
         space.access = body.access
     if body.scenario is not None or body.default_scenarios is not None:
-        bound = _resolve_bound_scenario(body.scenario, body.default_scenarios)
+        bound = await resolve_bound_scenario(session, body.scenario, body.default_scenarios)
         space.default_scenarios = [bound]
         if body.allowed_kinds is not None:
             space.allowed_kinds = allowed_kinds_for_scenario(bound, body.allowed_kinds)
         else:
             space.allowed_kinds = allowed_kinds_for_scenario(bound, None)
     elif body.allowed_kinds is not None:
-        bound = _resolve_bound_scenario(None, list(space.default_scenarios or []))
+        bound = await resolve_bound_scenario(session, None, list(space.default_scenarios or []))
         space.allowed_kinds = allowed_kinds_for_scenario(bound, body.allowed_kinds)
     if body.knowledge_version is not None:
         set_space_knowledge_version(space, body.knowledge_version)
+    if body.top_k is not None or body.score is not None:
+        existing_top_k, existing_score = space_retrieval_from_row(space)
+        apply_space_retrieval_attrs(
+            space,
+            top_k=body.top_k if body.top_k is not None else existing_top_k,
+            score=body.score if body.score is not None else existing_score,
+        )
     await session.commit()
     await session.refresh(space)
     return space_to_response(space, my_role="admin")
@@ -1095,7 +1398,12 @@ async def import_document(
 async def _parse_upload_bytes(data: bytes, filename: str) -> ParseResult:
     """Parse uploaded bytes with optional ``knowledge.parse.timeout_seconds``."""
     timeout = get_knowledge_config().parse.timeout_seconds
-    coro = asyncio.to_thread(parse_file_bytes, data, filename)
+
+    def _parse() -> ParseResult:
+        parsed, _backend = parse_file_bytes_with_fallback(data, filename)
+        return parsed
+
+    coro = asyncio.to_thread(_parse)
     if timeout > 0:
         try:
             return await asyncio.wait_for(coro, timeout=float(timeout))
@@ -1431,10 +1739,16 @@ async def search(
             break
     pack = resolve_scenario(request_scenario=scenario, space_default_scenarios=default_scenarios)
     scenario_cfg = get_scenario_config(pack.id)
-    effective_top_k = top_k if top_k is not None else pack.top_k
+    space_top_k: int | None = None
+    space_score: float | None = None
+    if space_ids:
+        primary = accessible_by_id.get(space_ids[0])
+        if primary is not None:
+            space_top_k, space_score = space_retrieval_from_row(primary)
+    effective_top_k = top_k if top_k is not None else space_top_k if space_top_k is not None else pack.top_k
     final_top_k = int(effective_top_k or scenario_cfg.top_k or 8)
     pool_k = retrieve_top_k if retrieve_top_k is not None else effective_top_k
-    cutoff = similarity_cutoff if similarity_cutoff is not None else pack.score
+    cutoff = similarity_cutoff if similarity_cutoff is not None else (space_score if space_score is not None else pack.score)
     if fusion_queries is None and scenario_cfg.fusion_num_queries is not None:
         fusion_queries = max(1, int(scenario_cfg.fusion_num_queries))
 

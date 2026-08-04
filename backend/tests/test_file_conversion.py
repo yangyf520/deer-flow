@@ -523,6 +523,31 @@ def test_parse_file_bytes_uses_docling(monkeypatch):
     assert seen == {"name": "policy.docx", "data": b"document bytes"}
 
 
+def test_parse_file_bytes_falls_back_to_markitdown(monkeypatch):
+    from deerflow.utils import file_conversion
+
+    monkeypatch.setattr(
+        file_conversion,
+        "parse_file_bytes",
+        lambda _data, _name: ParseResult(
+            text="",
+            parse_quality="failed",
+            error="Docling is not installed",
+        ),
+    )
+    monkeypatch.setattr(
+        file_conversion,
+        "parse_markitdown_bytes",
+        lambda _data, _name: ParseResult(text="# Fallback", parse_quality="ok"),
+    )
+
+    parsed, backend = file_conversion.parse_file_bytes_with_fallback(b"x", "policy.docx")
+
+    assert backend == "markitdown"
+    assert parsed.text == "# Fallback"
+    assert parsed.parse_quality == "ok"
+
+
 def test_sanitize_media_removes_embedded_payload():
     payload = "A" * 80
     text = sanitize_media(f"before\ndata:image/png;base64,{payload}\n\nafter")

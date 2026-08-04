@@ -13,7 +13,7 @@ from langchain_core.utils.json import parse_json_markdown
 
 from deerflow.config.app_config import AppConfig
 from deerflow.doc_parse.contract import DocParseMeta, DocParseResponse
-from deerflow.utils.file_conversion import ParseResult, parse_file_bytes
+from deerflow.utils.file_conversion import ParseResult, parse_file_bytes_with_fallback
 from deerflow.utils.llm_text import strip_think_blocks
 from deerflow.utils.oneshot_llm import run_oneshot_llm
 
@@ -45,38 +45,9 @@ def _prompt_hash(prompt: str) -> str:
     return f"sha256:{hashlib.sha256(prompt.encode()).hexdigest()[:16]}"
 
 
-def _markitdown_bytes(data: bytes, filename: str) -> ParseResult:
-    """Reuse upload-sidecar MarkItDown when Docling is unavailable (e.g. missing torch)."""
-    import tempfile
-
-    try:
-        from markitdown import MarkItDown
-    except ImportError:
-        return ParseResult(text="", parse_quality="failed", error="MarkItDown is not installed")
-
-    suffix = Path(filename).suffix or ".bin"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(data)
-        path = Path(tmp.name)
-    try:
-        text = (MarkItDown().convert(str(path)).text_content or "").strip()
-        if not text:
-            return ParseResult(text="", parse_quality="failed", error="empty MarkItDown output")
-        return ParseResult(text=text, parse_quality="ok")
-    except Exception as exc:
-        logger.warning("MarkItDown fallback failed for %s: %s", filename, exc)
-        return ParseResult(text="", parse_quality="failed", error=str(exc))
-    finally:
-        path.unlink(missing_ok=True)
-
-
 def _to_markdown(data: bytes, filename: str) -> tuple[ParseResult, str]:
     """Return (parse result, backend name: ``docling`` | ``markitdown``)."""
-    parsed = parse_file_bytes(data, filename)
-    if parsed.parse_quality == "ok" and (parsed.text or "").strip():
-        return parsed, "docling"
-    logger.info("Docling unavailable for %s (%s); falling back to MarkItDown", filename, parsed.error)
-    return _markitdown_bytes(data, filename), "markitdown"
+    return parse_file_bytes_with_fallback(data, filename)
 
 
 def _parse_json(raw: str) -> Any:

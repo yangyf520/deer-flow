@@ -1,10 +1,6 @@
 install:
 	uv sync
 
-# Docling needs torch; on macOS install PyPI wheels if uv lock has no darwin wheel yet.
-ensure-docling:
-	@bash scripts/ensure_docling_torch.sh
-
 dev:
 	PYTHONPATH=. PYTHONIOENCODING=utf-8 PYTHONUTF8=1 uv run uvicorn app.gateway.app:app --host 0.0.0.0 --port 8001 --reload
 

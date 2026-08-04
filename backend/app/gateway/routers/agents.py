@@ -52,6 +52,8 @@ class AgentResponse(BaseModel):
         description="Bound knowledge space ids (None=unset, []=unbound)",
     )
     knowledge_scenario: str | None = Field(default=None, description="Default retrieval scenario type")
+    user_id: str | None = Field(default=None, description="Owning user id")
+    created_at: str | None = Field(default=None, description="Creation timestamp (ISO 8601)")
 
 
 class AgentsListResponse(BaseModel):
@@ -186,7 +188,35 @@ def _apply_model_behavior(config_data: dict, source: BaseModel, existing: AgentC
         config_data[field] = value.model_dump(exclude_none=True) if isinstance(value, BaseModel) else value
 
 
-def _agent_config_to_response(agent_cfg: AgentConfig, include_soul: bool = False, *, user_id: str | None = None) -> AgentResponse:
+def _format_agent_created_at(value) -> str | None:
+    if value is None:
+        return None
+    from datetime import UTC
+
+    if getattr(value, "tzinfo", None) is None:
+        value = value.replace(tzinfo=UTC)
+    else:
+        value = value.astimezone(UTC)
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _agent_audit_fields(name: str, user_id: str | None) -> tuple[str | None, str | None]:
+    if not user_id:
+        return None, None
+    audit = get_agent_store().get_audit(name, user_id=user_id)
+    if audit is None:
+        return user_id, None
+    owner_id, created_at = audit
+    return owner_id, _format_agent_created_at(created_at)
+
+
+def _agent_config_to_response(
+    agent_cfg: AgentConfig,
+    include_soul: bool = False,
+    *,
+    user_id: str | None = None,
+    created_at: str | None = None,
+) -> AgentResponse:
     """Convert AgentConfig to AgentResponse."""
     soul: str | None = None
     if include_soul:
@@ -204,6 +234,18 @@ def _agent_config_to_response(agent_cfg: AgentConfig, include_soul: bool = False
         soul=soul,
         knowledge_spaces=agent_cfg.knowledge_spaces,
         knowledge_scenario=agent_cfg.knowledge_scenario,
+        user_id=user_id,
+        created_at=created_at,
+    )
+
+
+def _agent_response_with_audit(agent_cfg: AgentConfig, user_id: str) -> AgentResponse:
+    owner_id, created_at = _agent_audit_fields(agent_cfg.name, user_id)
+    return _agent_config_to_response(
+        agent_cfg,
+        include_soul=True,
+        user_id=owner_id or user_id,
+        created_at=created_at,
     )
 
 
@@ -228,7 +270,7 @@ async def list_agents() -> AgentsListResponse:
         # _agent_config_to_response are filesystem IO (file backend) or DB round
         # trips (db backend) and must stay off the event loop.
         agents = list_custom_agents(user_id=user_id)
-        return AgentsListResponse(agents=[_agent_config_to_response(a, include_soul=True, user_id=user_id) for a in agents])
+        return AgentsListResponse(agents=[_agent_response_with_audit(a, user_id) for a in agents])
 
     try:
         return await asyncio.to_thread(_list)
@@ -291,7 +333,7 @@ async def get_agent(name: str) -> AgentResponse:
     def _get() -> AgentResponse:
         # Worker thread: config read + SOUL read must stay off the event loop.
         agent_cfg = load_agent_config(name, user_id=user_id)
-        return _agent_config_to_response(agent_cfg, include_soul=True, user_id=user_id)
+        return _agent_response_with_audit(agent_cfg, user_id)
 
     try:
         return await asyncio.to_thread(_get)
@@ -351,7 +393,7 @@ async def create_agent_endpoint(request: AgentCreateRequest) -> AgentResponse:
         store.create(normalized_name, config_data, request.soul, user_id=user_id)
         logger.info("Created agent '%s'", normalized_name)
         agent_cfg = load_agent_config(normalized_name, user_id=user_id)
-        return _agent_config_to_response(agent_cfg, include_soul=True, user_id=user_id)
+        return _agent_response_with_audit(agent_cfg, user_id)
 
     try:
         return await asyncio.to_thread(_create_agent)
@@ -482,7 +524,7 @@ async def update_agent(name: str, request: AgentUpdateRequest) -> AgentResponse:
         def _refresh() -> AgentResponse:
             # Worker thread: re-read config + SOUL off the event loop.
             refreshed_cfg = load_agent_config(name, user_id=user_id)
-            return _agent_config_to_response(refreshed_cfg, include_soul=True, user_id=user_id)
+            return _agent_response_with_audit(refreshed_cfg, user_id)
 
         return await asyncio.to_thread(_refresh)
 

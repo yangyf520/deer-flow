@@ -18,6 +18,7 @@ import logging
 import shutil
 import tempfile
 from collections.abc import Hashable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,24 @@ class FileAgentStore(AgentStore):
         except yaml.YAMLError as e:
             raise ValueError(f"Failed to parse agent config {config_file}: {e}") from e
         return parse_agent_config(data, name)
+
+    def get_audit(
+        self,
+        name: str,
+        *,
+        user_id: str | None = None,
+    ) -> tuple[str, datetime] | None:
+        name = validate_agent_name(name)
+        effective_user = user_id or _ac.get_effective_user_id()
+        try:
+            agent_dir = resolve_agent_dir(name, user_id=user_id)
+        except FileNotFoundError:
+            return None
+        config_file = agent_dir / "config.yaml"
+        if not config_file.exists():
+            return None
+        mtime = config_file.stat().st_mtime
+        return effective_user, datetime.fromtimestamp(mtime, tz=UTC)
 
     def exists(self, name: str, *, user_id: str | None = None) -> bool:
         name = validate_agent_name(name)

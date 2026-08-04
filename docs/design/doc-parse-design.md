@@ -48,6 +48,9 @@ POST /api/doc/parse（multipart: file + segment_prompt）
 `APIRouter(prefix="/api/doc")` → **`POST /api/doc/parse`**  
 鉴权：`runs:create`（同 input-polish）。
 
+**向量化入库（与 parse 同前缀）：** **`POST /api/doc/embed/{space_id}`**  
+鉴权：`knowledge:write`。multipart：`file`、`kind`、可选 `title`、`tags[]`。写入指定知识空间（解析 + 切块 + embed）。结构化上传流程：parse → 预览 → embed。
+
 | 字段 | 必填 | 说明 |
 |------|------|------|
 | `file` | 是 | 待解析文件 |
@@ -85,12 +88,12 @@ POST /api/doc/parse（multipart: file + segment_prompt）
 
 Docling 随 `deerflow-harness[knowledge]` extra 安装；`knowledge` extra 含 `torch` / `torchvision`（平台约束见 `backend/pyproject.toml` `[tool.uv]`）。
 
-- Linux x86_64：`torch+cpu` 由 uv lock 解析（pytorch-cpu index）。
-- **macOS 本地**：若 `import torch` 失败、Docling 回退 MarkItDown，在 `backend/` 执行：
+- Linux x86_64：`torch+cpu` 由 uv lock 解析（pytorch-cpu index），`uv sync --extra knowledge` 即可。
+- **macOS 本地**：lockfile 仅含 Linux torch wheel，`uv sync --extra knowledge` 装不上 torch；解析自动回退 **MarkItDown**（见 `parse_file_bytes_with_fallback`）。若需 Docling 高质量解析，可手动安装 PyPI torch（须在项目目录外执行，否则 uv 只 audit 不安装）：
 
 ```bash
-make ensure-docling
-# 或: bash scripts/ensure_docling_torch.sh
+(cd /tmp && uv pip install --python /path/to/backend/.venv/bin/python \
+  --index-url https://pypi.org/simple "torch>=2.2.2,<2.3.0" "torchvision>=0.17.2,<0.18.0")
 ```
 
 本地 `make dev` 在 `config.yaml → knowledge.enabled: true` 时会 `uv sync --extra knowledge`。

@@ -487,7 +487,7 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
     # Knowledge API is mounted at /api/knowledge/v1
     app.include_router(knowledge.router)
 
-    # Document parse API is mounted at /api/doc/parse
+    # Document API: /api/doc/parse, /api/doc/embed/{space_id}
     app.include_router(doc.router)
 
     # Skills API is mounted at /api/skills

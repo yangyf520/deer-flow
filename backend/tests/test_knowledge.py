@@ -1095,6 +1095,80 @@ def test_kinds_api_lists_catalog():
         assert body["total"] == len(body["items"])
 
 
+def test_list_configured_tag_groups_explicit():
+    from deerflow.config.knowledge_config import (
+        KnowledgeConfig,
+        KnowledgeTagGroupConfig,
+        get_knowledge_config,
+        set_knowledge_config,
+    )
+    from deerflow.knowledge.service import list_configured_tag_groups
+
+    prev = get_knowledge_config()
+    try:
+        set_knowledge_config(
+            KnowledgeConfig(
+                tag_groups=[
+                    KnowledgeTagGroupConfig(id="national", tags=["statute", "national-law"]),
+                    KnowledgeTagGroupConfig(id="company", tags=["company-policy"]),
+                ],
+            )
+        )
+        groups = list_configured_tag_groups()
+        assert [g.id for g in groups] == ["national", "company"]
+        assert groups[0].tags == ["statute", "national-law"]
+    finally:
+        set_knowledge_config(prev)
+
+
+def test_list_configured_tag_groups_derived_from_lanes():
+    from deerflow.config.knowledge_config import (
+        KnowledgeConfig,
+        KnowledgeScenarioConfig,
+        ScenarioLaneConfig,
+        get_knowledge_config,
+        set_knowledge_config,
+    )
+    from deerflow.knowledge.service import list_configured_tag_groups
+
+    prev = get_knowledge_config()
+    try:
+        set_knowledge_config(
+            KnowledgeConfig(
+                scenarios=[
+                    KnowledgeScenarioConfig(
+                        type="policy-review",
+                        lanes=[
+                            ScenarioLaneConfig(kinds=["policy"], tags=["statute", "national-law"]),
+                            ScenarioLaneConfig(kinds=["policy"], tags=["company-policy"]),
+                        ],
+                    )
+                ],
+            )
+        )
+        groups = list_configured_tag_groups()
+        assert len(groups) == 2
+        tag_sets = {tuple(g.tags) for g in groups}
+        assert ("company-policy",) in tag_sets
+        assert ("national-law", "statute") in tag_sets
+    finally:
+        set_knowledge_config(prev)
+
+
+def test_knowledge_catalog_api():
+    client = TestClient(_api_app())
+    res = client.get(
+        "/api/knowledge/v1/catalog",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert res.status_code in (200, 401, 403)
+    if res.status_code == 200:
+        body = res.json()
+        for key in ("kinds", "tags", "tag_groups", "scenarios"):
+            assert key in body
+            assert isinstance(body[key], list)
+
+
 class TestKnowledgeLanes:
     """Scenario lane resolve + slot/RRF merge (orchestration only; retrieval uses LlamaIndex)."""
 
@@ -1158,3 +1232,72 @@ class TestKnowledgeLanes:
                 top_k=5,
             )
         assert result["needle_hit_rate"] >= 1.0
+
+
+def test_tag_group_applies_only_when_lane_tags_overlap():
+    from deerflow.config.knowledge_config import (
+        KnowledgeScenarioConfig,
+        KnowledgeTagGroupConfig,
+        ScenarioLaneConfig,
+    )
+    from deerflow.knowledge.catalog import _tag_group_fits
+
+    general = KnowledgeScenarioConfig(type="general-qa", top_k=8, score=0.35)
+    policy = KnowledgeScenarioConfig(
+        type="policy-review",
+        lanes=[
+            ScenarioLaneConfig(kinds=["policy"], tags=["statute", "national-law"]),
+            ScenarioLaneConfig(kinds=["policy"], tags=["company-policy"]),
+        ],
+    )
+    national = KnowledgeTagGroupConfig(id="national", tags=["statute", "national-law"])
+    company = KnowledgeTagGroupConfig(id="company", tags=["company-policy"])
+
+    assert not _tag_group_fits(general, national)
+    assert not _tag_group_fits(general, company)
+    assert _tag_group_fits(policy, national)
+    assert _tag_group_fits(policy, company)
+
+
+def test_compact_scenario_attrs_drops_redundant_fields():
+    from deerflow.knowledge.catalog import _compact_scenario_attrs, linked_scenario_space_id
+
+    assert linked_scenario_space_id("finance-review", {}) == "finance-review"
+    assert linked_scenario_space_id("finance-review", {"space_id": "finance-review"}) == "finance-review"
+
+    compact = _compact_scenario_attrs(
+        {
+            "description": "",
+            "top_k": 8,
+            "score": 0.35,
+            "merge_mode": "slot_then_rrf",
+            "fusion_num_queries": None,
+            "kinds": ["policy", "case"],
+            "lanes": [{"kinds": ["policy"], "budget": 4}],
+            "labels": {"zh-CN": "制度预审"},
+            "space_id": "finance-review",
+        },
+        code="finance-review",
+    )
+    assert "space_id" not in compact
+    assert "kinds" not in compact
+    assert "top_k" not in compact
+    assert "score" not in compact
+    assert "merge_mode" not in compact
+    assert "fusion_num_queries" not in compact
+    assert "description" not in compact
+    assert compact["lanes"] == [{"kinds": ["policy"], "budget": 4}]
+    assert compact["labels"] == {"zh-CN": "制度预审"}
+
+    override = _compact_scenario_attrs(
+        {"space_id": "legacy-space", "labels": {"zh-CN": "旧库"}},
+        code="finance-review",
+    )
+    assert override["space_id"] == "legacy-space"
+
+    host = _compact_scenario_attrs(
+        {"host_space_id": "legal-kb", "labels": {"zh-CN": "法务"}},
+        code="finance-review",
+    )
+    assert host["host_space_id"] == "legal-kb"
+    assert "space_id" not in host

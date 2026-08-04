@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Hashable
+from datetime import datetime
 from typing import Any, Literal
 
 from deerflow.config.agents_config import AgentConfig
@@ -119,6 +120,15 @@ class AgentStore(abc.ABC):
     @abc.abstractmethod
     def delete(self, name: str, *, user_id: str | None = None) -> AgentDeleteOutcome:
         """Delete an agent and its co-located memory, returning the outcome."""
+
+    def get_audit(
+        self,
+        name: str,
+        *,
+        user_id: str | None = None,
+    ) -> tuple[str, datetime] | None:
+        """Return ``(owner_user_id, created_at)`` when available for UI audit meta."""
+        return None
 
     @abc.abstractmethod
     def signature(self) -> Hashable:

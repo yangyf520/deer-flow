@@ -116,6 +116,19 @@ class SqlAgentStore(AgentStore):
             return None
         return row.soul or None
 
+    def get_audit(
+        self,
+        name: str,
+        *,
+        user_id: str | None = None,
+    ) -> tuple[str, datetime] | None:
+        effective_user = user_id or get_effective_user_id()
+        with self._Session() as session:
+            row = self._row(session, name, effective_user)
+        if row is None:
+            return None
+        return row.user_id, row.created_at
+
     def list(self, *, user_id: str | None = None) -> list[AgentConfig]:
         effective_user = user_id or get_effective_user_id()
         stmt = select(AgentRow).where(AgentRow.user_id == effective_user).order_by(AgentRow.name.asc())

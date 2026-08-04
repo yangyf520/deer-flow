@@ -206,6 +206,23 @@ class KnowledgeKindConfig(BaseModel):
     id: str = Field(min_length=1, description="Machine id stored on documents, e.g. policy")
 
 
+class KnowledgeTagConfig(BaseModel):
+    """Tag id for document metadata / lane filters (display labels in frontend i18n)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(min_length=1, description="Machine tag id, e.g. statute")
+
+
+class KnowledgeTagGroupConfig(BaseModel):
+    """UI bundle of tags (e.g. national regulations lane); labels in frontend i18n."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(min_length=1, description="Tag group id for UI toggles, e.g. national")
+    tags: list[str] = Field(default_factory=list, description="Member tag ids")
+
+
 class ScenarioLaneConfig(BaseModel):
     """One parallel retrieval lane within a scenario."""
 
@@ -296,24 +313,36 @@ class KnowledgeParseConfig(BaseModel):
     timeout_seconds: int = 120
 
 
-def _normalize_kinds(value: Any) -> list[dict[str, Any] | KnowledgeKindConfig | str]:
+def _normalize_catalog_ids(value: Any, *, field: str) -> list[dict[str, Any] | str]:
     """Accept list[id] or list[{id}] (legacy label fields ignored)."""
     if value is None:
         return []
     if not isinstance(value, list):
-        raise TypeError(f"kinds must be a list, got {type(value)!r}")
+        raise TypeError(f"{field} must be a list, got {type(value)!r}")
     out: list[dict[str, Any] | str] = []
     for item in value:
         if isinstance(item, str):
             sid = item.strip()
             if sid:
                 out.append({"id": sid})
-        elif isinstance(item, KnowledgeKindConfig):
-            out.append(item)
         elif isinstance(item, dict):
             out.append(item)
         else:
-            raise TypeError(f"kinds entries must be str, dict, or KnowledgeKindConfig, got {type(item)!r}")
+            raise TypeError(f"{field} entries must be str or dict, got {type(item)!r}")
+    return out
+
+
+def _normalize_kinds(value: Any) -> list[dict[str, Any] | KnowledgeKindConfig | str]:
+    """Accept list[id] or list[{id}] (legacy label fields ignored)."""
+    if value is None:
+        return []
+    normalized = _normalize_catalog_ids(value, field="kinds")
+    out: list[dict[str, Any] | KnowledgeKindConfig | str] = []
+    for item in normalized:
+        if isinstance(item, KnowledgeKindConfig):
+            out.append(item)
+        else:
+            out.append(item)
     return out
 
 
@@ -330,6 +359,14 @@ class KnowledgeConfig(BaseModel):
         default_factory=list,
         description="Optional global kind catalog; empty = no global whitelist (use space/scenario)",
     )
+    tags: list[KnowledgeTagConfig] = Field(
+        default_factory=list,
+        description="Optional global tag catalog; empty = union of tag_groups and scenario lanes",
+    )
+    tag_groups: list[KnowledgeTagGroupConfig] = Field(
+        default_factory=list,
+        description="UI tag bundles (machine ids; labels in frontend i18n)",
+    )
     scenarios: list[KnowledgeScenarioConfig] = Field(default_factory=_default_scenarios)
     authz: KnowledgeAuthzConfig = Field(default_factory=KnowledgeAuthzConfig)
 
@@ -342,6 +379,11 @@ class KnowledgeConfig(BaseModel):
     @classmethod
     def _kinds_list(cls, value: Any) -> Any:
         return _normalize_kinds(value)
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _tags_list(cls, value: Any) -> Any:
+        return _normalize_catalog_ids(value, field="tags")
 
     def scenario_by_type(self, scenario_type: str | None) -> KnowledgeScenarioConfig | None:
         want = (scenario_type or "").strip()
@@ -363,6 +405,12 @@ class KnowledgeConfig(BaseModel):
 
     def configured_kind_ids(self) -> set[str]:
         return {item.id for item in self.kinds if item.id}
+
+    def configured_tag_ids(self) -> set[str]:
+        return {item.id for item in self.tags if item.id}
+
+    def configured_tag_group_ids(self) -> set[str]:
+        return {item.id for item in self.tag_groups if item.id}
 
 
 _knowledge_config: KnowledgeConfig = KnowledgeConfig()

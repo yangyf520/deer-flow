@@ -298,7 +298,7 @@ const { data, meta } = await res.json();
 
 | 项 | 值 |
 |----|-----|
-| 方法 / 路径 | **`POST /api/knowledge/v1/spaces/{space_id}/documents/import`** |
+| 方法 / 路径 | **`POST /api/doc/embed/{space_id}`** |
 | `file` | UTF-8 文本字节（内容为 embed 文本，文件名如 `{detail_id}.txt`） |
 | `kind` | `legal-clause` |
 | `tags[]` | `rule_spaces.tags` + 可选 `category` slug |
@@ -365,7 +365,7 @@ BFF 对外仍可提供 **`POST /search`**（法务 BFF），内部转发上述 k
 ```text
 浏览器 → POST /spaces/{id}/confirm
   → BFF 读 rule_details[]
-  → 每条 POST /api/knowledge/v1/spaces/{ks}/documents/import
+  → 每条 POST /api/doc/embed/{ks}
   → 每条 PATCH …/documents/{doc_id}（attrs.detail_id …）
   → 全部 OK → rule_spaces.status=active, embedded_at=now()
 ```
@@ -374,7 +374,7 @@ BFF 对外仍可提供 **`POST /search`**（法务 BFF），内部转发上述 k
 
 | 场景 | API |
 |------|-----|
-| 确认向量化 | `POST /api/knowledge/v1/spaces/{id}/documents/import` |
+| 确认向量化 | `POST /api/doc/embed/{space_id}` |
 | 写向量 metadata | `PATCH …/documents/{doc_id}` |
 | 改条文 re-embed | `POST …/documents/{doc_id}/reindex` |
 | 废止删向量 | `DELETE …/documents/{doc_id}` |
