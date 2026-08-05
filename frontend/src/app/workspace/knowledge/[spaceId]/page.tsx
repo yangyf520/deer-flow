@@ -54,7 +54,7 @@ import { useI18n } from "@/core/i18n/hooks";
 import type { Translations } from "@/core/i18n/locales/types";
 import {
   deleteDocument,
-  documentIngestModeLabel,
+  docIngestModeLabel,
   getSpace,
   importDocument,
   listCatalog,
@@ -64,11 +64,11 @@ import {
   resolveSegmentPrompt,
   structuredMarkdownFile,
   phaseLabel,
-  readDocumentIngestMode,
+  readDocIngestMode,
   readStoredIngestMode,
   reindexDocument,
   statusLabel,
-  storeDocumentIngestMode,
+  storeDocIngestMode,
   storeIngestMode,
   tagGroupLabel,
   tagGroupsFromTags,
@@ -310,8 +310,8 @@ export default function KnowledgeSpaceDocumentsPage() {
     setBusy(false);
   }
 
-  async function persistDocumentIngestMode(docId: string, mode: UploadMode) {
-    storeDocumentIngestMode(docId, mode);
+  async function saveDocIngestMode(docId: string, mode: UploadMode) {
+    storeDocIngestMode(docId, mode);
     await updateDocument(spaceId, docId, { attrs: { ingest_mode: mode } });
   }
 
@@ -329,11 +329,11 @@ export default function KnowledgeSpaceDocumentsPage() {
       { signal },
     );
     if (embedded.doc_id) {
-      storeDocumentIngestMode(embedded.doc_id, ingestMode);
+      storeDocIngestMode(embedded.doc_id, ingestMode);
     }
     if (embedded.deduped) {
       if (embedded.doc_id) {
-        await persistDocumentIngestMode(embedded.doc_id, ingestMode);
+        await saveDocIngestMode(embedded.doc_id, ingestMode);
       }
       setNotice(embedded.message ?? t.knowledge.dedupedNotice);
       setError(null);
@@ -436,7 +436,7 @@ export default function KnowledgeSpaceDocumentsPage() {
     setReindexingId(doc.id);
     try {
       const prepared = await fileForIngest(file, ingestMode);
-      await persistDocumentIngestMode(doc.id, ingestMode);
+      await saveDocIngestMode(doc.id, ingestMode);
       await reindexDocument(spaceId, doc.id, prepared.file);
       await reload();
       const deadline = Date.now() + 120_000;
@@ -633,10 +633,10 @@ export default function KnowledgeSpaceDocumentsPage() {
             <ul className="divide-border divide-y">
               {docs.map((d) => {
                 const detail = ingestDetail(d, t.knowledge);
-                const ingestModeLabel = documentIngestModeLabel(
+                const ingestModeLabel = docIngestModeLabel(
                   d,
                   t.knowledge,
-                  readDocumentIngestMode(d.id),
+                  readDocIngestMode(d.id),
                 );
                 const showFilename = !sameTitleAsFilename(d);
                 const uploadedAt = formatUploadedAt(d.created_at, locale);

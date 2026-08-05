@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
 import logging
 import re
@@ -227,11 +226,11 @@ def _match_candidates(body: str) -> list[str]:
     return out
 
 
-def _line_number_at_index(source_text: str, index: int) -> int:
+def _row_no_at(source_text: str, index: int) -> int:
     return source_text[:index].count("\n") + 1
 
 
-def _line_number_for_body(body: str, source_text: str) -> int | None:
+def _find_row_no(body: str, source_text: str) -> int | None:
     """1-based line number in ``source_text`` where ``body`` best matches."""
     if not str(body).strip() or not source_text.strip():
         return None
@@ -248,7 +247,7 @@ def _line_number_for_body(body: str, source_text: str) -> int | None:
     for cand in candidates:
         idx = source_text.find(cand)
         if idx >= 0:
-            return _line_number_at_index(source_text, idx)
+            return _row_no_at(source_text, idx)
 
     norm_source = _normalize_grounding_text(source_text)
     for cand in candidates:
@@ -263,12 +262,8 @@ def _line_number_for_body(body: str, source_text: str) -> int | None:
     return None
 
 
-def _row_no_b64(line_number: int) -> str:
-    return base64.b64encode(str(line_number).encode()).decode("ascii")
-
-
-def _attach_row_no_b64(data: Any, *, source_text: str) -> None:
-    """Add base64-encoded source line number (``row_no_b64``) to each ``details[]`` item."""
+def _attach_row_no(data: Any, *, source_text: str) -> None:
+    """Add 1-based source line number (``row_no``) to each ``details[]`` item."""
     if not isinstance(data, dict):
         return
     details = data.get("details")
@@ -277,13 +272,13 @@ def _attach_row_no_b64(data: Any, *, source_text: str) -> None:
     for item in details:
         if not isinstance(item, dict):
             continue
-        line_no = _line_number_for_body(str(item.get("body") or ""), source_text)
+        line_no = _find_row_no(str(item.get("body") or ""), source_text)
         if line_no is None:
             label = item.get("segment_label") or item.get("label")
             if label is not None:
-                line_no = _line_number_for_body(str(label), source_text)
+                line_no = _find_row_no(str(label), source_text)
         if line_no is not None:
-            item["row_no_b64"] = _row_no_b64(line_no)
+            item["row_no"] = line_no
 
 
 def _collect_warnings(data: Any, *, source_text: str = "") -> list[str]:
@@ -410,7 +405,7 @@ async def parse_document(
     merged = _merge_all(list(batch_results))
     if output_schema:
         _validate_schema(merged, output_schema)
-    _attach_row_no_b64(merged, source_text=source_text)
+    _attach_row_no(merged, source_text=source_text)
 
     warnings = _collect_warnings(merged, source_text=source_text)
     if warnings:

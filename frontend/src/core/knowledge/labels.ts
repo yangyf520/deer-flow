@@ -72,29 +72,29 @@ export function spaceDisplayLabel(space: {
   return space.id;
 }
 
-function isGenericSpaceId(id: string): boolean {
+function isGenericSpace(id: string): boolean {
   const trimmed = id.trim();
   return (
     trimmed === "space" || trimmed === "default" || /^space-\d+$/i.test(trimmed)
   );
 }
 
-function looksLikeSpaceSlug(value: string): boolean {
+function isSpaceSlug(value: string): boolean {
   return /^[a-z0-9][a-z0-9_-]*$/i.test(value.trim());
 }
 
 /** Edit-dialog space id — recover legacy slugs stored only on name/description. */
-export function spaceEditIdentifier(space: {
+export function spaceEditId(space: {
   id: string;
   name?: string | null;
   description?: string | null;
 }): string {
   const id = space.id.trim();
-  if (id && !isGenericSpaceId(id)) return id;
+  if (id && !isGenericSpace(id)) return id;
   const name = space.name?.trim();
-  if (name && !isGenericSpaceId(name)) return name;
+  if (name && !isGenericSpace(name)) return name;
   const description = space.description?.trim();
-  if (description && looksLikeSpaceSlug(description)) return description;
+  if (description && isSpaceSlug(description)) return description;
   if (id) return id;
   return name ?? "";
 }
@@ -105,7 +105,7 @@ export function spaceCardTitle(space: {
   name?: string | null;
   description?: string | null;
 }): string {
-  return spaceEditIdentifier(space);
+  return spaceEditId(space);
 }
 
 /** Secondary line — human description when it differs from the code title. */
@@ -135,8 +135,8 @@ export function spacePrimaryCode(space: {
   const name = space.name?.trim() ?? "";
   const scenario = boundScenarioType(space);
 
-  if (id && !isGenericSpaceId(id)) return id;
-  if (name && /^[a-z0-9][a-z0-9_-]*$/i.test(name) && !isGenericSpaceId(name)) {
+  if (id && !isGenericSpace(id)) return id;
+  if (name && /^[a-z0-9][a-z0-9_-]*$/i.test(name) && !isGenericSpace(name)) {
     return name;
   }
   if (scenario) return scenario;
@@ -193,7 +193,7 @@ export function resolveSpaceCodeLabel(
 ): string | null {
   const match = spaces.find((s) => s.id === spaceId || s.name === spaceId);
   if (match) return spaceCodeLabel(match);
-  return isGenericSpaceId(spaceId) ? null : spaceId;
+  return isGenericSpace(spaceId) ? null : spaceId;
 }
 
 /** Default document kind for import when the UI no longer exposes kind selection. */
@@ -300,7 +300,7 @@ export function ingestModeLabel(
 
 export type DocumentIngestMode = "structured" | "unstructured";
 
-export function documentIngestMode(
+export function docIngestMode(
   doc: { attrs?: Record<string, unknown> | null },
   fallback?: DocumentIngestMode | null,
 ): DocumentIngestMode | null {
@@ -310,12 +310,12 @@ export function documentIngestMode(
   return null;
 }
 
-export function documentIngestModeLabel(
+export function docIngestModeLabel(
   doc: { attrs?: Record<string, unknown> | null },
   t: KnowledgeT,
   fallback?: DocumentIngestMode | null,
 ): string | null {
-  const mode = documentIngestMode(doc, fallback);
+  const mode = docIngestMode(doc, fallback);
   return mode ? ingestModeLabel(mode, t) : null;
 }
 

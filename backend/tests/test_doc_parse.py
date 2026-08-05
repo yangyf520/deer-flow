@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 from io import BytesIO
 from types import SimpleNamespace
 
@@ -106,18 +105,12 @@ def test_collect_warnings_grounding():
     assert any("paraphrase" in w for w in warnings)
 
 
-def test_line_number_for_body_direct_match():
+def test_find_row_no():
     source = "header\n\n## Section\n\nclause one\n\nclause two"
-    assert pipeline._line_number_for_body("clause one", source) == 5
+    assert pipeline._find_row_no("clause one", source) == 5
 
 
-def test_row_no_b64_roundtrip():
-    encoded = pipeline._row_no_b64(12)
-    assert encoded == base64.b64encode(b"12").decode("ascii")
-    assert int(base64.b64decode(encoded).decode()) == 12
-
-
-def test_attach_row_no_b64_adds_field_to_details():
+def test_attach_row_no():
     source = "title\n\n**第1条**　正文一\n\n**第2条**　正文二"
     data = {
         "title": "L",
@@ -126,10 +119,10 @@ def test_attach_row_no_b64_adds_field_to_details():
             {"segment_label": "第2条", "body": "正文二"},
         ],
     }
-    pipeline._attach_row_no_b64(data, source_text=source)
-    assert "row_no_b64" in data["details"][0]
-    assert "row_no_b64" in data["details"][1]
-    assert int(base64.b64decode(data["details"][0]["row_no_b64"]).decode()) >= 1
+    pipeline._attach_row_no(data, source_text=source)
+    assert isinstance(data["details"][0]["row_no"], int)
+    assert isinstance(data["details"][1]["row_no"], int)
+    assert data["details"][0]["row_no"] >= 1
 
 
 def test_parse_document_runs_batches_in_parallel(monkeypatch):
@@ -230,8 +223,8 @@ def test_parse_document_happy_path(monkeypatch):
     assert len(result.data["details"]) == 2
     assert result.meta.batch_count == 2
     for detail in result.data["details"]:
-        assert "row_no_b64" in detail
-        assert int(base64.b64decode(detail["row_no_b64"]).decode()) >= 1
+        assert isinstance(detail["row_no"], int)
+        assert detail["row_no"] >= 1
 
 
 def test_parse_document_requires_prompt(monkeypatch):

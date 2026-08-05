@@ -26,7 +26,7 @@ import {
   createSpace,
   deleteSpace,
   listMySpaces,
-  spaceEditIdentifier,
+  spaceEditId,
   updateSpace,
   type Space,
 } from "@/core/knowledge";
@@ -133,7 +133,7 @@ export default function KnowledgeSpacesPage() {
 
   function openEditSpace(space: Space) {
     setEditingSpace(space);
-    setEditSpaceId(spaceEditIdentifier(space));
+    setEditSpaceId(spaceEditId(space));
     setEditDescription(space.description ?? "");
     setEditAccess(space.access);
     setEditTopK(

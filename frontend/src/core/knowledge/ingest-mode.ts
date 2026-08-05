@@ -18,13 +18,13 @@ export function storeIngestMode(spaceId: string, mode: UploadMode): void {
 const docStorageKey = (docId: string) =>
   `deerflow:knowledge:doc-ingest-mode:${docId}`;
 
-export function readDocumentIngestMode(docId: string): UploadMode | null {
+export function readDocIngestMode(docId: string): UploadMode | null {
   if (typeof window === "undefined") return null;
   const stored = sessionStorage.getItem(docStorageKey(docId));
   return stored === "structured" || stored === "unstructured" ? stored : null;
 }
 
-export function storeDocumentIngestMode(docId: string, mode: UploadMode): void {
+export function storeDocIngestMode(docId: string, mode: UploadMode): void {
   if (typeof window === "undefined") return;
   sessionStorage.setItem(docStorageKey(docId), mode);
 }

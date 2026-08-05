@@ -7,8 +7,8 @@ export type ParsedDetail = {
   chapter_path?: string;
   body?: string;
   ref_labels?: string[];
-  /** Base64-encoded 1-based source line number (matches knowledge embed `row_no`). */
-  row_no_b64?: string;
+  /** 1-based source line number in parsed markdown. */
+  row_no?: number;
 };
 
 export type ParsedDocumentData = {
