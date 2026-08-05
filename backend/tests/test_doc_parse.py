@@ -136,18 +136,63 @@ def test_attach_row_no_preserves_llm_uuid_and_replaces_integer():
         "details": [
             {"body": "one", "row_no": existing},
             {"body": "two", "row_no": 1},
-            {"body": "three"},
+            {"body": "three", "row_no": "143"},
+            {"body": "four"},
         ],
     }
     pipeline._attach_row_no(data, source_text="line one\nline two\nline three")
     assert data["details"][0]["row_no"] == existing
     assert data["details"][1]["row_no"] != "1"
-    assert data["details"][2]["row_no"] != existing
+    assert data["details"][2]["row_no"] != "143"
+    assert data["details"][3]["row_no"] != existing
     import uuid as uuid_mod
 
     for detail in data["details"][1:]:
         uuid_mod.UUID(detail["row_no"])
-    assert len({d["row_no"] for d in data["details"]}) == 3
+    assert len({d["row_no"] for d in data["details"]}) == 4
+
+
+def test_normalize_chapter_paths_fills_from_preceding_chapter():
+    data = {
+        "details": [
+            {"segment_label": "第一条", "chapter_path": "第一章 总则", "body": "a"},
+            {"segment_label": "第二条", "chapter_path": "第二条", "body": "b"},
+            {"segment_label": "第八条", "chapter_path": "第八条", "body": "c"},
+            {"segment_label": "第十八条", "chapter_path": "第三章 监督检查和法律责任", "body": "d"},
+            {"segment_label": "第十九条", "chapter_path": "第十九条", "body": "e"},
+        ],
+    }
+    pipeline._normalize_chapter_paths(data)
+    assert data["details"][0]["chapter_path"] == "第一章 总则"
+    assert data["details"][1]["chapter_path"] == "第一章 总则"
+    assert data["details"][2]["chapter_path"] == "第一章 总则"
+    assert data["details"][3]["chapter_path"] == "第三章 监督检查和法律责任"
+    assert data["details"][4]["chapter_path"] == "第三章 监督检查和法律责任"
+
+
+def test_repair_body_from_source_uses_label_anchor():
+    source = "第一条　原文一。\n\n第二条　原文二内容。"
+    repaired = pipeline._repair_body_from_source(label="第二条", body="模型改写过的句子。", source_text=source)
+    assert repaired == "原文二内容。"
+
+
+def test_repair_details_from_source_updates_ungrounded_body():
+    source = "第一条　原文一。\n\n第二条　原文二内容。"
+    data = {
+        "details": [
+            {"segment_label": "第一条", "body": "原文一。"},
+            {"segment_label": "第二条", "body": "模型改写过的句子。"},
+        ],
+    }
+    pipeline._repair_details_from_source(data, source_text=source)
+    assert data["details"][1]["body"] == "原文二内容。"
+    warnings = pipeline._collect_warnings(data, source_text=source)
+    assert not any("paraphrase" in w for w in warnings)
+
+
+def test_grounding_accepts_nfkc_punctuation_variant():
+    source = "第一条（一）原文内容在这里。"
+    assert pipeline._body_grounded_in_source("(一)原文内容在这里。", source)
 
 
 def test_parse_document_runs_batches_in_parallel(monkeypatch):

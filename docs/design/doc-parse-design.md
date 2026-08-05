@@ -14,6 +14,8 @@ POST /api/document/parse（multipart: file + segment_prompt）
   → MarkdownNodeParser 分块；若仅 1 块 → ATX # 或行首 **bold** 标题切分
   → 打包 batch（字符预算由 parse 模型 ``config.models[*].max_tokens`` 推导；每批 ≤20 段）→ 并行 run_oneshot_llm（≤8 并发）
   → langchain parse_json_markdown → 数组合并
+  → chapter_path 修正 + 源文 body 回填（grounding 失败时按条号锚定）
+  → 为每条 detail 分配 UUID ``row_no``
   → grounding + 质量 warnings
   → { data, meta }（不写库）
 ```
@@ -39,7 +41,8 @@ POST /api/document/parse（multipart: file + segment_prompt）
 
 - 空 `body`
 - 重复 `segment_label`
-- **grounding**：规范化空白后，`body`（或足够长前缀）须为源 Markdown 子串；否则 warning「possible paraphrase」
+- **grounding**：NFKC + 空白规范化后，`body`（或足够长前缀）须为源 Markdown 子串；否则 warning「possible paraphrase」。合并前会尝试按 `segment_label` 从源文回填未锚定的 `body`。
+- **`row_no`**：服务端为每条 detail 分配全局唯一 UUID；调用方预置的非空字符串 id 保留，整数或纯数字字符串（旧版行号）会被替换。
 
 ---
 

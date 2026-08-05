@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import logging
 import re
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,6 +46,10 @@ _BOLD_HEADING_RE = re.compile(
     rf"(?=^\*\*[^*\n]{{1,{_BOLD_LABEL_MAX_LEN}}}\*\*(?:[\s\u3000]|$))",
     re.MULTILINE,
 )
+_ARTICLE_LABEL_RE = re.compile(r"^第[0-9一二三四五六七八九十百千]+条$")
+_CHAPTER_HEADING_RE = re.compile(r"第[0-9一二三四五六七八九十百千]+章")
+_ARTICLE_MARKER_RE = re.compile(r"第[0-9一二三四五六七八九十百千]+条")
+_ENGLISH_CHAPTER_RE = re.compile(r"(?:Chapter|Part|Section)\s+\d", re.IGNORECASE)
 
 
 class DocParseError(Exception):
@@ -245,8 +250,9 @@ def _batches(
 
 
 def _normalize_grounding_text(text: str) -> str:
-    """Collapse whitespace for substring grounding checks."""
-    return re.sub(r"\s+", " ", text.strip())
+    """Collapse whitespace and unify compatibility forms for grounding checks."""
+    normalized = unicodedata.normalize("NFKC", text.strip())
+    return re.sub(r"\s+", " ", normalized)
 
 
 def _body_grounded_in_source(body: str, source: str) -> bool:
@@ -345,7 +351,15 @@ def _new_row_no() -> str:
 
 
 def _row_no_is_preserved(value: Any) -> bool:
-    return isinstance(value, str) and bool(value.strip())
+    """Keep caller-provided string ids; reject legacy numeric line numbers."""
+    if not isinstance(value, str):
+        return False
+    row_id = value.strip()
+    if not row_id:
+        return False
+    if row_id.isdigit():
+        return False
+    return True
 
 
 def _attach_row_no(data: Any, *, source_text: str = "") -> None:
@@ -375,6 +389,81 @@ def _attach_row_no(data: Any, *, source_text: str = "") -> None:
                 break
         item["row_no"] = row_id
         seen.add(row_id)
+
+
+def _is_article_label(text: str) -> bool:
+    return bool(_ARTICLE_LABEL_RE.match(text.strip()))
+
+
+def _looks_like_chapter_path(text: str) -> bool:
+    chapter = text.strip()
+    if not chapter or _is_article_label(chapter):
+        return False
+    if _CHAPTER_HEADING_RE.search(chapter):
+        return True
+    return _ENGLISH_CHAPTER_RE.search(chapter) is not None
+
+
+def _normalize_chapter_paths(data: dict[str, Any]) -> None:
+    """Fill chapter_path from the nearest preceding chapter heading when LLM reused a label."""
+    details = data.get("details")
+    if not isinstance(details, list):
+        return
+    current_chapter = ""
+    for item in details:
+        if not isinstance(item, dict):
+            continue
+        chapter = str(item.get("chapter_path") or "").strip()
+        label = str(item.get("segment_label") or item.get("label") or "").strip()
+        if chapter and _looks_like_chapter_path(chapter) and chapter != label:
+            current_chapter = chapter
+            continue
+        if current_chapter and (not chapter or chapter == label or _is_article_label(chapter)):
+            item["chapter_path"] = current_chapter
+
+
+def _repair_body_from_source(*, label: str, body: str, source_text: str) -> str | None:
+    """Recover verbatim body text from source when the model paraphrased."""
+    if _body_grounded_in_source(body, source_text):
+        return body
+    label = label.strip()
+    if not label:
+        return None
+    pos = 0
+    while True:
+        idx = source_text.find(label, pos)
+        if idx < 0:
+            return None
+        start = idx + len(label)
+        tail = re.sub(r"^[\s\u3000：:、，,。.；;（(]+", "", source_text[start:])
+        if not tail:
+            pos = idx + 1
+            continue
+        next_article = _ARTICLE_MARKER_RE.search(tail)
+        if next_article is not None:
+            if next_article.start() == 0:
+                pos = idx + 1
+                continue
+            extracted = tail[: next_article.start()].strip()
+        else:
+            extracted = tail.strip()
+        if extracted and _body_grounded_in_source(extracted, source_text):
+            return extracted
+        pos = idx + 1
+
+
+def _repair_details_from_source(data: dict[str, Any], *, source_text: str) -> None:
+    details = data.get("details")
+    if not isinstance(details, list) or not source_text.strip():
+        return
+    for item in details:
+        if not isinstance(item, dict):
+            continue
+        body = str(item.get("body") or "")
+        label = str(item.get("segment_label") or item.get("label") or "")
+        repaired = _repair_body_from_source(label=label, body=body, source_text=source_text)
+        if repaired is not None:
+            item["body"] = repaired
 
 
 def _collect_warnings(data: Any, *, source_text: str = "") -> list[str]:
@@ -503,6 +592,9 @@ async def parse_document(
     merged = _merge_all(list(batch_results))
     if output_schema:
         _validate_schema(merged, output_schema)
+    if isinstance(merged, dict):
+        _normalize_chapter_paths(merged)
+        _repair_details_from_source(merged, source_text=source_text)
     _attach_row_no(merged, source_text=source_text)
 
     warnings = _collect_warnings(merged, source_text=source_text)
