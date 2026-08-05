@@ -206,6 +206,21 @@ def docstore_dir(space_id: str) -> Path:
     return vectors_dir() / f"docstore_{space_id}"
 
 
+def rename_space_vectors(*, old_id: str, new_id: str) -> None:
+    """Best-effort rename of on-disk docstore for a knowledge space."""
+    import shutil
+
+    old_path = docstore_dir(old_id)
+    new_path = docstore_dir(new_id)
+    if not old_path.exists():
+        return
+    new_path.parent.mkdir(parents=True, exist_ok=True)
+    if new_path.exists():
+        shutil.rmtree(new_path)
+    old_path.rename(new_path)
+    logger.info("Renamed knowledge docstore %s -> %s", old_id, new_id)
+
+
 def _database_url() -> str:
     raw = os.getenv("DATABASE_URL") or ""
     if raw:

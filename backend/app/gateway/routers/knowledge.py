@@ -238,30 +238,13 @@ async def update_space(space_id: str, body: SpaceUpdateRequest, request: Request
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        space, _ = await knowledge_service.get_space_or_404(session, space_id=space_id, user_id=_uid(user), system_role=user.system_role, min_role="admin")
-        if body.name is not None:
-            space.name = body.name
-        if body.description is not None:
-            space.description = body.description
-        if body.access is not None:
-            space.access = body.access
-        if body.scenario is not None or body.default_scenarios is not None:
-            bound = await knowledge_service.resolve_bound_scenario(session, body.scenario, body.default_scenarios)
-            space.default_scenarios = [bound]
-            if body.allowed_kinds is not None:
-                space.allowed_kinds = knowledge_service.allowed_kinds_for_scenario(bound, body.allowed_kinds)
-            else:
-                # Re-bind scenario → sync whitelist to that scenario's lanes.
-                space.allowed_kinds = knowledge_service.allowed_kinds_for_scenario(bound, None)
-        elif body.allowed_kinds is not None:
-            bound = await knowledge_service.resolve_bound_scenario(session, None, list(space.default_scenarios or []))
-            space.allowed_kinds = knowledge_service.allowed_kinds_for_scenario(bound, body.allowed_kinds)
-        if body.knowledge_version is not None:
-            knowledge_service.set_space_knowledge_version(space, body.knowledge_version)
-        await session.commit()
-        await session.refresh(space)
-        role = "admin"
-        return knowledge_service.space_to_response(space, my_role=role)
+        return await knowledge_service.update_space(
+            session,
+            space_id=space_id,
+            user_id=_uid(user),
+            system_role=user.system_role,
+            body=body,
+        )
 
 
 @router.delete("/spaces/{space_id}", status_code=204)

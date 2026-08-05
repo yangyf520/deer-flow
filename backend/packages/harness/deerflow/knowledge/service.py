@@ -15,7 +15,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from deerflow.config.knowledge_config import get_knowledge_config
@@ -28,6 +28,7 @@ from deerflow.knowledge.rag import (
     lane_pool_k,
     parse_as_of,
     patch_document_metadata,
+    rename_space_vectors,
     resolve_scenario,
     scenario_kind_ids,
     search_space,
@@ -93,6 +94,7 @@ def resolve_agent_knowledge_scope(
 
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+_SPACE_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 
 
 def knowledge_extra_available() -> bool:
@@ -187,6 +189,7 @@ def apply_space_retrieval_attrs(space: Any, *, top_k: int | None, score: float |
 
 
 class SpaceUpdateRequest(BaseModel):
+    id: str | None = Field(default=None, min_length=1, max_length=64, description="Rename space id")
     name: str | None = None
     description: str | None = None
     access: str | None = None
@@ -646,6 +649,68 @@ def _slugify_space_id(name: str) -> str:
     return slug[:48]
 
 
+def normalize_space_id(raw: str) -> str:
+    """Normalize user input into a stable knowledge space id."""
+    text = (raw or "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="space id is required")
+    lowered = text.lower()
+    if _SPACE_ID_RE.fullmatch(lowered):
+        return lowered
+    slug = _slugify_space_id(text)
+    if not slug or slug == "space":
+        raise HTTPException(status_code=422, detail="invalid space id")
+    return slug[:64]
+
+
+async def rename_space_id(session: AsyncSession, *, old_id: str, new_id: str) -> None:
+    """Rename a knowledge space primary key and update dependent rows."""
+    from deerflow.knowledge.catalog import rename_catalog_space_references
+    from deerflow.persistence.knowledge.model import KnowledgeDocumentRow, KnowledgeGrantRow, KnowledgeSpaceRow
+
+    target = normalize_space_id(new_id)
+    if target == old_id:
+        return
+    if await session.get(KnowledgeSpaceRow, target):
+        raise HTTPException(status_code=409, detail="space id already exists")
+
+    old = await session.get(KnowledgeSpaceRow, old_id)
+    if old is None:
+        raise HTTPException(status_code=404, detail="Space not found")
+
+    session.add(
+        KnowledgeSpaceRow(
+            id=target,
+            name=old.name,
+            description=old.description,
+            access=old.access,
+            owner_user_id=old.owner_user_id,
+            allowed_kinds=list(old.allowed_kinds or []),
+            default_scenarios=list(old.default_scenarios or []),
+            schema_version=old.schema_version,
+            attrs=dict(old.attrs or {}),
+            created_at=old.created_at,
+            updated_at=_now(),
+        )
+    )
+    await session.flush()
+
+    await session.execute(update(KnowledgeDocumentRow).where(KnowledgeDocumentRow.space_id == old_id).values(space_id=target))
+    await session.execute(update(KnowledgeGrantRow).where(KnowledgeGrantRow.space_id == old_id).values(space_id=target))
+    await session.execute(
+        update(KnowledgeGrantRow)
+        .where(
+            KnowledgeGrantRow.resource_type == "space",
+            KnowledgeGrantRow.resource_id == old_id,
+        )
+        .values(resource_id=target)
+    )
+    await rename_catalog_space_references(session, old_id=old_id, new_id=target)
+    await session.delete(old)
+    await session.flush()
+    await asyncio.to_thread(rename_space_vectors, old_id=old_id, new_id=target)
+
+
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -896,7 +961,7 @@ async def create_space(
         else:
             kinds = list(catalog) if catalog else []
 
-    base_id = (space_id or "").strip() or _slugify_space_id(name)
+    base_id = normalize_space_id(space_id) if (space_id or "").strip() else _slugify_space_id(name)
     candidate = base_id
     # Avoid collisions: legal, legal-2, legal-3...
     for i in range(2, 50):
@@ -1018,6 +1083,13 @@ async def update_space(
         system_role=system_role,
         min_role="admin",
     )
+    if body.id is not None:
+        new_id = normalize_space_id(body.id)
+        if new_id != space_id:
+            await rename_space_id(session, old_id=space_id, new_id=new_id)
+            space = await session.get(KnowledgeSpaceRow, new_id)
+            if space is None:
+                raise HTTPException(status_code=404, detail="Space not found")
     if body.name is not None:
         space.name = body.name
     if body.description is not None:

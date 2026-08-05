@@ -829,6 +829,39 @@ async def upsert_scenario(
     return row
 
 
+async def rename_catalog_space_references(
+    session: AsyncSession,
+    *,
+    old_id: str,
+    new_id: str,
+) -> None:
+    """Update pub_codes attrs that reference a knowledge space id."""
+    rows = list(
+        (
+            await session.execute(
+                select(PubCodeRow).where(
+                    PubCodeRow.domain == KNOWLEDGE_DOMAIN,
+                    PubCodeRow.enabled.is_(True),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in rows:
+        attrs = dict(row.attrs or {})
+        changed = False
+        if linked_scenario_space_id(row.code, attrs) == old_id:
+            attrs["space_id"] = new_id
+            changed = True
+        if catalog_host_space_id(attrs) == old_id:
+            attrs["host_space_id"] = new_id
+            changed = True
+        if changed:
+            row.attrs = _compact_scenario_attrs(attrs, code=row.code)
+            row.updated_at = _utcnow()
+
+
 async def migrate_catalog_host(session: AsyncSession, *, host_space_id: str) -> int:
     """Assign all enabled catalog scenarios to a knowledge space (码表归属迁移)."""
     from fastapi import HTTPException
