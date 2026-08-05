@@ -6,6 +6,8 @@ import asyncio
 import hashlib
 import logging
 import re
+import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.utils.json import parse_json_markdown
 
 from deerflow.config.app_config import AppConfig
+from deerflow.config.knowledge_config import get_knowledge_config
 from deerflow.doc_parse.contract import DocParseMeta, DocParseResponse
 from deerflow.models import create_chat_model
 from deerflow.utils.file_conversion import (
@@ -26,9 +29,13 @@ from deerflow.utils.oneshot_llm import run_oneshot_llm
 
 logger = logging.getLogger(__name__)
 
-MAX_BATCH_CHARS = 12000
-MAX_BLOCKS_PER_BATCH = 20
-MAX_CONCURRENT_BATCHES = 8
+# Batch sizing: derived from config.models[*].max_tokens at runtime (no knowledge.parse knobs).
+_DEFAULT_MAX_BLOCKS_PER_BATCH = 20
+_DEFAULT_MAX_CONCURRENT_BATCHES = 8
+_INPUT_CHARS_PER_TOKEN = 2
+_INPUT_TOKEN_FRACTION = 0.5  # reserve the other half for JSON output
+_FALLBACK_MAX_TOKENS = 8192
+
 _BOLD_LABEL_MAX_LEN = 80
 _GROUNDING_MIN_BODY_LEN = 12
 
@@ -45,6 +52,46 @@ class DocParseError(Exception):
         super().__init__(message)
         self.status_code = status_code
         self.message = message
+
+
+@dataclass(frozen=True)
+class ParseBatchLimits:
+    max_chars: int
+    max_blocks: int | None
+    max_concurrent: int
+
+
+def _resolve_parse_model_name(*, app_config: AppConfig, model_name: str | None) -> str:
+    configured = (model_name or get_knowledge_config().parse.model_name or "").strip()
+    if configured:
+        return configured
+    models = getattr(app_config, "models", None)
+    if models:
+        first = models[0]
+        return getattr(first, "name", str(first))
+    return "default"
+
+
+def _model_max_tokens(*, app_config: AppConfig, model_name: str) -> int:
+    get_model_config = getattr(app_config, "get_model_config", None)
+    model_cfg = get_model_config(model_name) if callable(get_model_config) else None
+    if model_cfg is not None:
+        raw = model_cfg.model_dump(exclude_none=True).get("max_tokens")
+        if isinstance(raw, int) and raw > 0:
+            return raw
+    return _FALLBACK_MAX_TOKENS
+
+
+def resolve_parse_batch_limits(*, app_config: AppConfig, model_name: str | None = None) -> ParseBatchLimits:
+    """Batch sizing from the parse model's max_tokens (config.models slot)."""
+    resolved_model = _resolve_parse_model_name(app_config=app_config, model_name=model_name)
+    max_tokens = _model_max_tokens(app_config=app_config, model_name=resolved_model)
+    max_chars = max(int(max_tokens * _INPUT_CHARS_PER_TOKEN * _INPUT_TOKEN_FRACTION), 256)
+    return ParseBatchLimits(
+        max_chars=max_chars,
+        max_blocks=_DEFAULT_MAX_BLOCKS_PER_BATCH,
+        max_concurrent=_DEFAULT_MAX_CONCURRENT_BATCHES,
+    )
 
 
 def _prompt_hash(prompt: str) -> str:
@@ -167,10 +214,13 @@ def _markdown_blocks(text: str) -> list[str]:
 def _batches(
     blocks: list[str],
     *,
-    max_chars: int = MAX_BATCH_CHARS,
-    max_blocks: int = MAX_BLOCKS_PER_BATCH,
+    max_chars: int,
+    max_blocks: int | None = None,
 ) -> list[str]:
-    """Pack sections into LLM batches; limit count and chars so output JSON stays bounded."""
+    """Pack sections into LLM batches; limit by character budget and section count."""
+    if not blocks:
+        return []
+
     out: list[str] = []
     buf: list[str] = []
     size = 0
@@ -182,7 +232,8 @@ def _batches(
             out.extend(_chunk_text(block, max_chars=max_chars))
             continue
         need = len(block) + (2 if buf else 0)
-        if buf and (size + need > max_chars or len(buf) >= max_blocks):
+        block_cap_reached = max_blocks is not None and len(buf) >= max_blocks
+        if buf and (size + need > max_chars or block_cap_reached):
             out.append("\n\n".join(buf))
             buf, size = [block], len(block)
         else:
@@ -288,25 +339,42 @@ def _find_row_no(body: str, source_text: str, *, after_line: int = 0) -> int | N
     return None
 
 
-def _attach_row_no(data: Any, *, source_text: str) -> None:
-    """Add 1-based source line number (``row_no``) to each ``details[]`` item."""
+def _new_row_no() -> str:
+    """UUID string for a detail row; stable across knowledge import."""
+    return str(uuid.uuid4())
+
+
+def _row_no_is_preserved(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _attach_row_no(data: Any, *, source_text: str = "") -> None:
+    """Assign a unique UUID ``row_no`` to each ``details[]`` item.
+
+    Caller/LLM may pre-set ``row_no`` as a non-empty string (e.g. business id);
+    those values are kept. Missing or numeric legacy values are replaced with a new id.
+    ``source_text`` is accepted for call-site compatibility but is not used for row ids.
+    """
+    _ = source_text
     if not isinstance(data, dict):
         return
     details = data.get("details")
     if not isinstance(details, list):
         return
-    last_line = 0
+    seen: set[str] = set()
     for item in details:
         if not isinstance(item, dict):
             continue
-        line_no = _find_row_no(str(item.get("body") or ""), source_text, after_line=last_line)
-        if line_no is None:
-            label = item.get("segment_label") or item.get("label")
-            if label is not None:
-                line_no = _find_row_no(str(label), source_text, after_line=last_line)
-        if line_no is not None:
-            item["row_no"] = line_no
-            last_line = line_no
+        existing = item.get("row_no")
+        if _row_no_is_preserved(existing):
+            seen.add(str(existing).strip())
+            continue
+        while True:
+            row_id = _new_row_no()
+            if row_id not in seen:
+                break
+        item["row_no"] = row_id
+        seen.add(row_id)
 
 
 def _collect_warnings(data: Any, *, source_text: str = "") -> list[str]:
@@ -409,13 +477,14 @@ async def parse_document(
         raise DocParseError(parsed.error or "document parse failed")
 
     blocks = _markdown_blocks(source_text)
-    batches = _batches(blocks)
+    batch_limits = resolve_parse_batch_limits(app_config=app_config, model_name=model_name)
+    batches = _batches(blocks, max_chars=batch_limits.max_chars, max_blocks=batch_limits.max_blocks)
     if not batches:
         raise DocParseError("document produced no text blocks")
 
     total = len(batches)
     chat_model = create_chat_model(name=model_name, thinking_enabled=False, app_config=app_config)
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT_BATCHES)
+    semaphore = asyncio.Semaphore(batch_limits.max_concurrent)
     batch_results = await asyncio.gather(
         *[
             _run_batch_llm(

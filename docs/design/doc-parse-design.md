@@ -12,7 +12,7 @@
 POST /api/document/parse（multipart: file + segment_prompt）
   → parse_file_bytes（Docling；失败则 MarkItDown fallback）
   → MarkdownNodeParser 分块；若仅 1 块 → ATX # 或行首 **bold** 标题切分
-  → 打包 batch（≤4000 字、≤10 段/批）→ 并行 run_oneshot_llm（≤4 并发）
+  → 打包 batch（字符预算由 parse 模型 ``config.models[*].max_tokens`` 推导；每批 ≤20 段）→ 并行 run_oneshot_llm（≤8 并发）
   → langchain parse_json_markdown → 数组合并
   → grounding + 质量 warnings
   → { data, meta }（不写库）
@@ -26,8 +26,8 @@ POST /api/document/parse（multipart: file + segment_prompt）
 |------|------|
 | 解析 | Docling 优先；不可用（缺 torch 等）→ MarkItDown |
 | 结构切分 | LlamaIndex `MarkdownNodeParser`；单块时 fallback：`^#{1,6}\s` 或行首 `**标题**` |
-| 超限块 | 单段 >4000 字 → 按 `\n\n` 段落边界硬切 |
-| LLM 批次 | 贪心打包：每批 ≤4000 字且 ≤10 个 section |
+| 超限块 | 单段超过字符预算 → 按 `\n\n` 段落边界硬切 |
+| LLM 批次 | 贪心打包：每批 ≤ ``max_tokens`` 推导字符预算且 ≤20 段 |
 
 ### 1.2 语义切条（调用方）
 
@@ -77,7 +77,7 @@ POST /api/document/parse（multipart: file + segment_prompt）
 |------|-------------|
 | 解析 | `deerflow.utils.file_conversion.parse_file_bytes` + MarkItDown fallback |
 | 分块 | LlamaIndex `MarkdownNodeParser` + 通用标题 regex |
-| LLM | `deerflow.utils.oneshot_llm.run_oneshot_llm`（`asyncio.gather`，`MAX_CONCURRENT_BATCHES=4`） |
+| LLM | `deerflow.utils.oneshot_llm.run_oneshot_llm`（`asyncio.gather`；batch 上限见模型 `max_tokens`） |
 | JSON | `langchain_core.utils.json.parse_json_markdown` + `strip_think_blocks` |
 | Schema | 可选 `jsonschema` |
 | 代码 | `deerflow/doc_parse/pipeline.py`、`app/gateway/routers/doc.py` |

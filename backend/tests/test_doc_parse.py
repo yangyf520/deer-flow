@@ -59,9 +59,11 @@ def test_split_by_headings_bold():
 
 
 def test_batches_limits_block_count():
-    blocks = [f"sec-{i}" for i in range(25)]
-    batches = pipeline._batches(blocks, max_chars=100_000, max_blocks=10)
-    assert len(batches) == 3
+    blocks = [f"{'x' * 500}-sec-{i}" for i in range(25)]
+    joined_len = len("\n\n".join(blocks))
+    assert joined_len > 6000
+    batches = pipeline._batches(blocks, max_chars=6000, max_blocks=10)
+    assert len(batches) >= 3
     assert all(len(b.split("\n\n")) <= 10 for b in batches)
 
 
@@ -110,8 +112,9 @@ def test_find_row_no():
     assert pipeline._find_row_no("clause one", source) == 5
 
 
-def test_attach_row_no():
-    source = "title\n\n**第1条**　正文一\n\n**第2条**　正文二"
+def test_attach_row_no_assigns_unique_uuid_ids():
+    import uuid as uuid_mod
+
     data = {
         "title": "L",
         "details": [
@@ -119,24 +122,32 @@ def test_attach_row_no():
             {"segment_label": "第2条", "body": "正文二"},
         ],
     }
-    pipeline._attach_row_no(data, source_text=source)
-    assert data["details"][0]["row_no"] == 3
-    assert data["details"][1]["row_no"] == 5
-    assert data["details"][0]["row_no"] < data["details"][1]["row_no"]
+    pipeline._attach_row_no(data, source_text="ignored")
+    ids = [detail["row_no"] for detail in data["details"]]
+    assert all(isinstance(row_id, str) and row_id for row_id in ids)
+    assert len(set(ids)) == 2
+    for row_id in ids:
+        uuid_mod.UUID(row_id)
 
 
-def test_attach_row_no_skips_earlier_duplicate_body():
-    source = "header\n\n**第1条**　甲\n\n**第2条**　乙\n\n**第3条**　甲"
+def test_attach_row_no_preserves_llm_uuid_and_replaces_integer():
+    existing = "d34f6874-7417-49ca-8aaf-f8aab4e63b0a"
     data = {
-        "title": "L",
         "details": [
-            {"segment_label": "第1条", "body": "甲"},
-            {"segment_label": "第3条", "body": "甲"},
+            {"body": "one", "row_no": existing},
+            {"body": "two", "row_no": 1},
+            {"body": "three"},
         ],
     }
-    pipeline._attach_row_no(data, source_text=source)
-    assert data["details"][0]["row_no"] == 3
-    assert data["details"][1]["row_no"] == 7
+    pipeline._attach_row_no(data, source_text="line one\nline two\nline three")
+    assert data["details"][0]["row_no"] == existing
+    assert data["details"][1]["row_no"] != "1"
+    assert data["details"][2]["row_no"] != existing
+    import uuid as uuid_mod
+
+    for detail in data["details"][1:]:
+        uuid_mod.UUID(detail["row_no"])
+    assert len({d["row_no"] for d in data["details"]}) == 3
 
 
 def test_parse_document_runs_batches_in_parallel(monkeypatch):
@@ -148,7 +159,16 @@ def test_parse_document_runs_batches_in_parallel(monkeypatch):
         lambda data, filename: (ParseResult(text="# T\n\nclause one", parse_quality="ok"), "docling"),
     )
     monkeypatch.setattr(pipeline, "_markdown_blocks", lambda text: ["a", "b", "c"])
-    monkeypatch.setattr(pipeline, "_batches", lambda blocks, max_chars=6000, max_blocks=10: blocks)
+    monkeypatch.setattr(
+        pipeline,
+        "resolve_parse_batch_limits",
+        lambda **kwargs: pipeline.ParseBatchLimits(max_chars=6000, max_blocks=10, max_concurrent=8),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_batches",
+        lambda blocks, max_chars, max_blocks=None: blocks,
+    )
 
     responses = [
         '{"title":"Doc","details":[{"segment_label":"1","body":"a"}]}',
@@ -188,8 +208,31 @@ def test_split_pipl_style_markdown_block_count():
     text = "**法**\n\n**第一章**　总则\n\n" + "\n\n".join(f"**第{i}条**　内容{i}" for i in range(1, 21))
     blocks = pipeline._markdown_blocks(text)
     assert len(blocks) >= 15
-    batches = pipeline._batches(blocks)
+    batches = pipeline._batches(blocks, max_chars=100_000, max_blocks=20)
     assert len(batches) >= 2
+
+
+def test_resolve_parse_batch_limits_from_model_max_tokens():
+    from deerflow.config.app_config import AppConfig
+    from deerflow.config.model_config import ModelConfig
+    from deerflow.config.sandbox_config import SandboxConfig
+
+    app_config = AppConfig(
+        models=[
+            ModelConfig(
+                name="default",
+                display_name="Default",
+                use="langchain_openai:ChatOpenAI",
+                model="test",
+                max_tokens=16384,
+            )
+        ],
+        sandbox=SandboxConfig(use="deerflow.sandbox.local:LocalSandboxProvider"),
+    )
+    limits = pipeline.resolve_parse_batch_limits(app_config=app_config)
+    assert limits.max_chars == 16384
+    assert limits.max_blocks == 20
+    assert limits.max_concurrent == 8
 
 
 def test_validate_schema_fails():
@@ -231,7 +274,16 @@ def test_parse_document_happy_path(monkeypatch):
         ),
     )
     monkeypatch.setattr(pipeline, "_markdown_blocks", lambda text: ["clause one", "clause two"])
-    monkeypatch.setattr(pipeline, "_batches", lambda blocks, max_chars=6000: ["clause one", "clause two"])
+    monkeypatch.setattr(
+        pipeline,
+        "resolve_parse_batch_limits",
+        lambda **kwargs: pipeline.ParseBatchLimits(max_chars=6000, max_blocks=None, max_concurrent=8),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_batches",
+        lambda blocks, max_chars, max_blocks=None: ["clause one", "clause two"],
+    )
 
     responses = [
         '{"title":"Doc","details":[{"segment_label":"1","body":"clause one"}]}',
@@ -261,9 +313,9 @@ def test_parse_document_happy_path(monkeypatch):
     assert result.data["title"] == "Doc"
     assert len(result.data["details"]) == 2
     assert result.meta.batch_count == 2
-    for detail in result.data["details"]:
-        assert isinstance(detail["row_no"], int)
-        assert detail["row_no"] >= 1
+    row_ids = [detail["row_no"] for detail in result.data["details"]]
+    assert all(isinstance(row_id, str) and row_id for row_id in row_ids)
+    assert len(set(row_ids)) == len(row_ids)
 
 
 def test_parse_document_requires_prompt(monkeypatch):

@@ -7,8 +7,8 @@ export type ParsedDetail = {
   chapter_path?: string;
   body?: string;
   ref_labels?: string[];
-  /** 1-based source line number in parsed markdown. */
-  row_no?: number;
+  /** Stable UUID row id for knowledge import / audit (caller-defined or server-assigned). */
+  row_no?: string;
 };
 
 export type ParsedDocumentData = {
