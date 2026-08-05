@@ -54,6 +54,7 @@ import { useI18n } from "@/core/i18n/hooks";
 import type { Translations } from "@/core/i18n/locales/types";
 import {
   deleteDocument,
+  documentIngestModeLabel,
   getSpace,
   importDocument,
   listCatalog,
@@ -63,12 +64,15 @@ import {
   resolveSegmentPrompt,
   structuredMarkdownFile,
   phaseLabel,
+  readDocumentIngestMode,
   readStoredIngestMode,
   reindexDocument,
   statusLabel,
+  storeDocumentIngestMode,
   storeIngestMode,
   tagGroupLabel,
   tagGroupsFromTags,
+  updateDocument,
   importKindForSpace,
   type DocumentChunk,
   type KnowledgeDocument,
@@ -306,23 +310,35 @@ export default function KnowledgeSpaceDocumentsPage() {
     setBusy(false);
   }
 
+  async function persistDocumentIngestMode(docId: string, mode: UploadMode) {
+    storeDocumentIngestMode(docId, mode);
+    await updateDocument(spaceId, docId, { attrs: { ingest_mode: mode } });
+  }
+
   async function importUploadedFile(
     file: File,
     kind: string,
+    ingestMode: UploadMode,
     title?: string,
     signal?: AbortSignal,
   ) {
     const embedded = await importDocument(
       spaceId,
       file,
-      { kind, title },
+      { kind, title, attrs: { ingest_mode: ingestMode } },
       { signal },
     );
+    if (embedded.doc_id) {
+      storeDocumentIngestMode(embedded.doc_id, ingestMode);
+    }
     if (embedded.deduped) {
+      if (embedded.doc_id) {
+        await persistDocumentIngestMode(embedded.doc_id, ingestMode);
+      }
       setNotice(embedded.message ?? t.knowledge.dedupedNotice);
       setError(null);
       await reload();
-      return null;
+      return embedded.doc_id;
     }
     await reload();
     await waitForDocumentIngest(embedded.doc_id, signal);
@@ -396,6 +412,7 @@ export default function KnowledgeSpaceDocumentsPage() {
       const docId = await importUploadedFile(
         importFile,
         kind,
+        mode,
         importTitle,
         signal,
       );
@@ -419,6 +436,7 @@ export default function KnowledgeSpaceDocumentsPage() {
     setReindexingId(doc.id);
     try {
       const prepared = await fileForIngest(file, ingestMode);
+      await persistDocumentIngestMode(doc.id, ingestMode);
       await reindexDocument(spaceId, doc.id, prepared.file);
       await reload();
       const deadline = Date.now() + 120_000;
@@ -615,6 +633,11 @@ export default function KnowledgeSpaceDocumentsPage() {
             <ul className="divide-border divide-y">
               {docs.map((d) => {
                 const detail = ingestDetail(d, t.knowledge);
+                const ingestModeLabel = documentIngestModeLabel(
+                  d,
+                  t.knowledge,
+                  readDocumentIngestMode(d.id),
+                );
                 const showFilename = !sameTitleAsFilename(d);
                 const uploadedAt = formatUploadedAt(d.created_at, locale);
                 const uploader = uploaderLabel(d, user);
@@ -654,6 +677,15 @@ export default function KnowledgeSpaceDocumentsPage() {
                           >
                             {ingestBadgeLabel(d, t.knowledge)}
                           </Badge>,
+                          ingestModeLabel ? (
+                            <Badge
+                              key="ingest-mode"
+                              variant="outline"
+                              className="h-5 px-1.5 text-[10px] font-normal"
+                            >
+                              {ingestModeLabel}
+                            </Badge>
+                          ) : null,
                           ...tagGroupsFromTags(d.tags, tagGroupsCatalog).map(
                             (groupId) => (
                               <Badge

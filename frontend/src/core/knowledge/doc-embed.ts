@@ -2,14 +2,7 @@ import { throwGatewayApiError } from "@/core/api/errors";
 import { fetch } from "@/core/api/fetcher";
 import { getBackendBaseURL } from "@/core/config";
 
-export type DocumentImportResponse = {
-  doc_id: string;
-  status: string;
-  job_phase: string;
-  progress: number;
-  deduped?: boolean;
-  message?: string | null;
-};
+import type { DocumentImportResponse } from "./api";
 
 export async function importDocument(
   spaceId: string,

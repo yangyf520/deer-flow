@@ -2,11 +2,7 @@
 
 import { useState } from "react";
 
-import {
-  AccessSelect,
-  UploadModeToggle,
-  type UploadMode,
-} from "@/app/workspace/knowledge/ui";
+import { AccessSelect } from "@/app/workspace/knowledge/ui";
 import {
   ConfirmDialog,
   DialogFieldGrid,
@@ -28,8 +24,6 @@ function SpaceFormFields({
   setDescription,
   access,
   setAccess,
-  ingestMode,
-  setIngestMode,
   topK,
   setTopK,
   score,
@@ -43,8 +37,6 @@ function SpaceFormFields({
   setDescription: (v: string) => void;
   access: string;
   setAccess: (v: string) => void;
-  ingestMode: UploadMode;
-  setIngestMode: (v: UploadMode) => void;
   topK: string;
   setTopK: (v: string) => void;
   score: string;
@@ -78,14 +70,6 @@ function SpaceFormFields({
           <AccessSelect
             value={access}
             onValueChange={setAccess}
-            disabled={disabled}
-            className="w-full"
-          />
-        </DialogSlotField>
-        <DialogSlotField label={t.knowledge.uploadModeLabel}>
-          <UploadModeToggle
-            value={ingestMode}
-            onValueChange={setIngestMode}
             disabled={disabled}
             className="w-full"
           />
@@ -128,8 +112,6 @@ interface SpaceCreateDialogProps {
   setDescription: (v: string) => void;
   access: string;
   setAccess: (v: string) => void;
-  ingestMode: UploadMode;
-  setIngestMode: (v: UploadMode) => void;
   topK: string;
   setTopK: (v: string) => void;
   score: string;
@@ -147,8 +129,6 @@ export function SpaceCreateDialog({
   setDescription,
   access,
   setAccess,
-  ingestMode,
-  setIngestMode,
   topK,
   setTopK,
   score,
@@ -176,8 +156,6 @@ export function SpaceCreateDialog({
         setDescription={setDescription}
         access={access}
         setAccess={setAccess}
-        ingestMode={ingestMode}
-        setIngestMode={setIngestMode}
         topK={topK}
         setTopK={setTopK}
         score={score}
@@ -199,8 +177,6 @@ interface SpaceEditDialogProps {
   setDescription: (v: string) => void;
   access: string;
   setAccess: (v: string) => void;
-  ingestMode: UploadMode;
-  setIngestMode: (v: UploadMode) => void;
   topK: string;
   setTopK: (v: string) => void;
   score: string;
@@ -221,8 +197,6 @@ export function SpaceEditDialog({
   setDescription,
   access,
   setAccess,
-  ingestMode,
-  setIngestMode,
   topK,
   setTopK,
   score,
@@ -262,8 +236,6 @@ export function SpaceEditDialog({
           setDescription={setDescription}
           access={access}
           setAccess={setAccess}
-          ingestMode={ingestMode}
-          setIngestMode={setIngestMode}
           topK={topK}
           setTopK={setTopK}
           score={score}

@@ -79,6 +79,51 @@ function isGenericSpaceId(id: string): boolean {
   );
 }
 
+function looksLikeSpaceSlug(value: string): boolean {
+  return /^[a-z0-9][a-z0-9_-]*$/i.test(value.trim());
+}
+
+/** Edit-dialog space id — recover legacy slugs stored only on name/description. */
+export function spaceEditIdentifier(space: {
+  id: string;
+  name?: string | null;
+  description?: string | null;
+}): string {
+  const id = space.id.trim();
+  if (id && !isGenericSpaceId(id)) return id;
+  const name = space.name?.trim();
+  if (name && !isGenericSpaceId(name)) return name;
+  const description = space.description?.trim();
+  if (description && looksLikeSpaceSlug(description)) return description;
+  if (id) return id;
+  return name ?? "";
+}
+
+/** Card title — space code (空间编号). */
+export function spaceCardTitle(space: {
+  id: string;
+  name?: string | null;
+  description?: string | null;
+}): string {
+  return spaceEditIdentifier(space);
+}
+
+/** Secondary line — human description when it differs from the code title. */
+export function spaceCardSubtitle(
+  space: {
+    id: string;
+    name?: string | null;
+    description?: string | null;
+  },
+  title: string,
+): string | undefined {
+  const description = space.description?.trim();
+  if (description && description !== title) return description;
+  const name = space.name?.trim();
+  if (name && name !== title) return name;
+  return undefined;
+}
+
 /** Primary space code (空间编号 / scenario code). */
 export function spacePrimaryCode(space: {
   id: string;
@@ -242,6 +287,36 @@ export function accessLabel(value: string, t: KnowledgeT): string {
 export function accessHint(value: string, t: KnowledgeT): string | null {
   if (value in t.accessHint) return t.accessHint[value as SpaceAccessValue];
   return null;
+}
+
+export function ingestModeLabel(
+  mode: "structured" | "unstructured",
+  t: KnowledgeT,
+): string {
+  return mode === "structured"
+    ? t.uploadModeStructured
+    : t.uploadModeUnstructured;
+}
+
+export type DocumentIngestMode = "structured" | "unstructured";
+
+export function documentIngestMode(
+  doc: { attrs?: Record<string, unknown> | null },
+  fallback?: DocumentIngestMode | null,
+): DocumentIngestMode | null {
+  const raw = doc.attrs?.ingest_mode;
+  if (raw === "structured" || raw === "unstructured") return raw;
+  if (fallback === "structured" || fallback === "unstructured") return fallback;
+  return null;
+}
+
+export function documentIngestModeLabel(
+  doc: { attrs?: Record<string, unknown> | null },
+  t: KnowledgeT,
+  fallback?: DocumentIngestMode | null,
+): string | null {
+  const mode = documentIngestMode(doc, fallback);
+  return mode ? ingestModeLabel(mode, t) : null;
 }
 
 export function roleLabel(value: string, t: KnowledgeT): string {

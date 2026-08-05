@@ -1457,6 +1457,12 @@ async def import_document(
             .first()
         )
         if existing is not None:
+            if attrs:
+                merged_attrs = dict(existing.attrs or {}) if isinstance(existing.attrs, dict) else {}
+                merged_attrs.update(merge_custom_metadata({}, attrs))
+                existing.attrs = merged_attrs
+                existing.updated_at = _now()
+                await session.commit()
             logger.info(
                 "import deduped space=%s checksum=%s existing=%s",
                 space_id,

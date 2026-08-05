@@ -19,7 +19,8 @@ import { useI18n } from "@/core/i18n/hooks";
 import {
   accessLabel,
   boundScenarioType,
-  scenarioLabel,
+  spaceCardSubtitle,
+  spaceCardTitle,
   type Space,
 } from "@/core/knowledge";
 import { cn } from "@/lib/utils";
@@ -38,23 +39,21 @@ export function SpaceCard({ space, onEdit }: SpaceCardProps) {
   const href = `/workspace/knowledge/${space.id}`;
   const bound = boundScenarioType(space);
   const isAdmin = space.my_role === "admin";
+  const title = spaceCardTitle(space);
+  const subtitle = spaceCardSubtitle(space, title);
 
   const metaTags = useMemo(() => {
     return itemMetaTags([
       { key: "access", label: accessLabel(space.access, kb) },
-      {
-        key: "scenario",
-        label: bound ? scenarioLabel(bound, kb) : kb.bindScenario,
-      },
     ]);
-  }, [bound, kb, space.access]);
+  }, [kb, space.access]);
 
   return (
     <ItemCard
       icon={BookOpenIcon}
       iconTone="knowledge"
-      title={space.id}
-      description={space.description ?? space.name}
+      title={title}
+      description={subtitle}
       metaTags={metaTags}
       href={href}
       badges={

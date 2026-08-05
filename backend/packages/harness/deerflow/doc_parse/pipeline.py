@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import logging
 import re
@@ -198,6 +199,93 @@ def _body_grounded_in_source(body: str, source: str) -> bool:
     return False
 
 
+def _match_candidates(body: str) -> list[str]:
+    """Search strings for locating ``body`` in source markdown (longest first)."""
+    raw = str(body).strip()
+    if not raw:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        v = value.strip()
+        if v and v not in seen:
+            seen.add(v)
+            out.append(v)
+
+    add(raw)
+    first_line = raw.split("\n")[0].strip()
+    if first_line != raw:
+        add(first_line)
+    first_para = raw.split("\n\n")[0].strip()
+    if first_para != raw and first_para != first_line:
+        add(first_para)
+    norm_body = _normalize_grounding_text(raw)
+    add(norm_body)
+    if len(norm_body) >= _GROUNDING_MIN_BODY_LEN:
+        add(norm_body[: max(_GROUNDING_MIN_BODY_LEN, len(norm_body) // 2)])
+    return out
+
+
+def _line_number_at_index(source_text: str, index: int) -> int:
+    return source_text[:index].count("\n") + 1
+
+
+def _line_number_for_body(body: str, source_text: str) -> int | None:
+    """1-based line number in ``source_text`` where ``body`` best matches."""
+    if not str(body).strip() or not source_text.strip():
+        return None
+
+    candidates = _match_candidates(body)
+    lines = source_text.splitlines()
+
+    for index, line in enumerate(lines, start=1):
+        norm_line = _normalize_grounding_text(line)
+        for cand in candidates:
+            if cand in line or cand in norm_line:
+                return index
+
+    for cand in candidates:
+        idx = source_text.find(cand)
+        if idx >= 0:
+            return _line_number_at_index(source_text, idx)
+
+    norm_source = _normalize_grounding_text(source_text)
+    for cand in candidates:
+        pos = norm_source.find(cand)
+        if pos < 0:
+            continue
+        consumed = 0
+        for index, line in enumerate(lines, start=1):
+            consumed += len(_normalize_grounding_text(line))
+            if consumed >= pos:
+                return index
+    return None
+
+
+def _row_no_b64(line_number: int) -> str:
+    return base64.b64encode(str(line_number).encode()).decode("ascii")
+
+
+def _attach_row_no_b64(data: Any, *, source_text: str) -> None:
+    """Add base64-encoded source line number (``row_no_b64``) to each ``details[]`` item."""
+    if not isinstance(data, dict):
+        return
+    details = data.get("details")
+    if not isinstance(details, list):
+        return
+    for item in details:
+        if not isinstance(item, dict):
+            continue
+        line_no = _line_number_for_body(str(item.get("body") or ""), source_text)
+        if line_no is None:
+            label = item.get("segment_label") or item.get("label")
+            if label is not None:
+                line_no = _line_number_for_body(str(label), source_text)
+        if line_no is not None:
+            item["row_no_b64"] = _row_no_b64(line_no)
+
+
 def _collect_warnings(data: Any, *, source_text: str = "") -> list[str]:
     """Lightweight post-merge checks; does not enforce business schema."""
     warnings: list[str] = []
@@ -322,6 +410,7 @@ async def parse_document(
     merged = _merge_all(list(batch_results))
     if output_schema:
         _validate_schema(merged, output_schema)
+    _attach_row_no_b64(merged, source_text=source_text)
 
     warnings = _collect_warnings(merged, source_text=source_text)
     if warnings:

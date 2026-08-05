@@ -139,6 +139,7 @@ export type KnowledgeDocument = {
   tags?: string[];
   effective_from?: string | null;
   effective_to?: string | null;
+  attrs?: Record<string, unknown>;
 };
 
 export type DocumentsListResponse = {
@@ -388,6 +389,7 @@ export async function updateDocument(
     effective_from?: string | null;
     effective_to?: string | null;
     title?: string;
+    attrs?: Record<string, unknown>;
   },
 ): Promise<KnowledgeDocument> {
   const res = await fetch(

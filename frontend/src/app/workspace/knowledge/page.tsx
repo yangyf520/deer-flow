@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import type { UploadMode } from "@/app/workspace/knowledge/ui";
 import {
   AlertError,
   HeaderCreateButton,
@@ -27,8 +26,7 @@ import {
   createSpace,
   deleteSpace,
   listMySpaces,
-  readStoredIngestMode,
-  storeIngestMode,
+  spaceEditIdentifier,
   updateSpace,
   type Space,
 } from "@/core/knowledge";
@@ -59,7 +57,6 @@ export default function KnowledgeSpacesPage() {
   const [spaceId, setSpaceId] = useState("");
   const [description, setDescription] = useState("");
   const [access, setAccess] = useState("open");
-  const [ingestMode, setIngestMode] = useState<UploadMode>("unstructured");
   const [topK, setTopK] = useState(String(DEFAULT_TOP_K));
   const [score, setScore] = useState(String(DEFAULT_SCORE));
   const [busy, setBusy] = useState(false);
@@ -68,8 +65,6 @@ export default function KnowledgeSpacesPage() {
   const [editSpaceId, setEditSpaceId] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editAccess, setEditAccess] = useState("open");
-  const [editIngestMode, setEditIngestMode] =
-    useState<UploadMode>("unstructured");
   const [editTopK, setEditTopK] = useState(String(DEFAULT_TOP_K));
   const [editScore, setEditScore] = useState(String(DEFAULT_SCORE));
   const [editBusy, setEditBusy] = useState(false);
@@ -115,7 +110,7 @@ export default function KnowledgeSpacesPage() {
     setBusy(true);
     try {
       const retrieval = parseRetrievalPayload(topK, score);
-      const created = await createSpace({
+      await createSpace({
         id: trimmedId,
         name: trimmedId,
         description: description.trim() || undefined,
@@ -123,10 +118,8 @@ export default function KnowledgeSpacesPage() {
         top_k: retrieval.top_k,
         score: retrieval.score,
       });
-      storeIngestMode(created.id, ingestMode);
       setSpaceId("");
       setDescription("");
-      setIngestMode("unstructured");
       setTopK(String(DEFAULT_TOP_K));
       setScore(String(DEFAULT_SCORE));
       setCreateOpen(false);
@@ -140,10 +133,9 @@ export default function KnowledgeSpacesPage() {
 
   function openEditSpace(space: Space) {
     setEditingSpace(space);
-    setEditSpaceId(space.id);
+    setEditSpaceId(spaceEditIdentifier(space));
     setEditDescription(space.description ?? "");
     setEditAccess(space.access);
-    setEditIngestMode(readStoredIngestMode(space.id));
     setEditTopK(
       space.top_k != null ? String(space.top_k) : String(DEFAULT_TOP_K),
     );
@@ -172,11 +164,6 @@ export default function KnowledgeSpacesPage() {
         top_k: retrieval.top_k,
         score: retrieval.score,
       });
-      if (idChanged) {
-        storeIngestMode(trimmedId, readStoredIngestMode(editingSpace.id));
-      } else {
-        storeIngestMode(editingSpace.id, editIngestMode);
-      }
       setEditingSpace(null);
       toast.success(t.knowledge.spaceUpdated);
       await reload();
@@ -268,8 +255,6 @@ export default function KnowledgeSpacesPage() {
         setDescription={setDescription}
         access={access}
         setAccess={setAccess}
-        ingestMode={ingestMode}
-        setIngestMode={setIngestMode}
         topK={topK}
         setTopK={setTopK}
         score={score}
@@ -290,8 +275,6 @@ export default function KnowledgeSpacesPage() {
         setDescription={setEditDescription}
         access={editAccess}
         setAccess={setEditAccess}
-        ingestMode={editIngestMode}
-        setIngestMode={setEditIngestMode}
         topK={editTopK}
         setTopK={setEditTopK}
         score={editScore}

@@ -347,9 +347,11 @@ async def test_import_dedupes_same_checksum():
             content_type="application/octet-stream",
             data=b"abc",
             kind="policy",
+            attrs={"ingest_mode": "structured"},
         )
         assert out.doc_id == "doc-old"
         assert out.deduped is True
+        assert existing.attrs == {"ingest_mode": "structured"}
         create_task.assert_not_called()
 
 
