@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from deerflow.config.app_config import AppConfig
@@ -38,6 +39,7 @@ async def run_oneshot_llm(
     app_config: AppConfig,
     model_name: str | None = None,
     thread_id: str | None = None,
+    model: BaseChatModel | None = None,
 ) -> str:
     """Run a single non-graph system+user LLM turn and return the raw text.
 
@@ -48,11 +50,13 @@ async def run_oneshot_llm(
         app_config: Application config used to build the model.
         model_name: Optional model override; ``None`` uses the default model.
         thread_id: Optional thread id, forwarded to Langfuse for tracing only.
+        model: Optional pre-built chat model (reused across parallel batch calls).
 
     Returns:
         The extracted plain-text content of the model response (uncleaned).
     """
-    model = create_chat_model(name=model_name, thinking_enabled=False, app_config=app_config)
+    if model is None:
+        model = create_chat_model(name=model_name, thinking_enabled=False, app_config=app_config)
     invoke_config: dict = {"run_name": run_name}
     inject_langfuse_metadata(
         invoke_config,

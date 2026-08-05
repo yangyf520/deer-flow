@@ -9,19 +9,26 @@ import re
 from pathlib import Path
 from typing import Any
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.utils.json import parse_json_markdown
 
 from deerflow.config.app_config import AppConfig
 from deerflow.doc_parse.contract import DocParseMeta, DocParseResponse
-from deerflow.utils.file_conversion import ParseResult, parse_file_bytes_with_fallback
+from deerflow.models import create_chat_model
+from deerflow.utils.file_conversion import (
+    ParseResult,
+    parse_file_bytes_with_fallback,
+    parse_markitdown_bytes,
+    sanitize_media,
+)
 from deerflow.utils.llm_text import strip_think_blocks
 from deerflow.utils.oneshot_llm import run_oneshot_llm
 
 logger = logging.getLogger(__name__)
 
-MAX_BATCH_CHARS = 8000
-MAX_BLOCKS_PER_BATCH = 15
-MAX_CONCURRENT_BATCHES = 6
+MAX_BATCH_CHARS = 12000
+MAX_BLOCKS_PER_BATCH = 20
+MAX_CONCURRENT_BATCHES = 8
 _BOLD_LABEL_MAX_LEN = 80
 _GROUNDING_MIN_BODY_LEN = 12
 
@@ -45,7 +52,16 @@ def _prompt_hash(prompt: str) -> str:
 
 
 def _to_markdown(data: bytes, filename: str) -> tuple[ParseResult, str]:
-    """Return (parse result, backend name: ``docling`` | ``markitdown``)."""
+    """Return (parse result, backend name). Prefers fast paths for text and Word."""
+    suffix = Path(filename).suffix.lower()
+    if suffix in {".md", ".markdown", ".txt"}:
+        text = sanitize_media(data.decode("utf-8", errors="replace"))
+        if text.strip():
+            return ParseResult(text=text, parse_quality="ok"), "text"
+    if suffix in {".doc", ".docx"}:
+        parsed = parse_markitdown_bytes(data, filename)
+        if parsed.parse_quality == "ok" and (parsed.text or "").strip():
+            return parsed, "markitdown"
     return parse_file_bytes_with_fallback(data, filename)
 
 
@@ -355,7 +371,7 @@ async def _run_batch_llm(
     total: int,
     prompt: str,
     app_config: AppConfig,
-    model_name: str | None,
+    chat_model: BaseChatModel,
     semaphore: asyncio.Semaphore,
 ) -> Any:
     async with semaphore:
@@ -365,7 +381,7 @@ async def _run_batch_llm(
                 user_content=_batch_user_content(chunk=chunk, index=index, total=total),
                 run_name="doc_parse",
                 app_config=app_config,
-                model_name=model_name,
+                model=chat_model,
             )
         except Exception as exc:
             logger.exception("doc_parse LLM failed batch=%s/%s", index + 1, total)
@@ -398,6 +414,7 @@ async def parse_document(
         raise DocParseError("document produced no text blocks")
 
     total = len(batches)
+    chat_model = create_chat_model(name=model_name, thinking_enabled=False, app_config=app_config)
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_BATCHES)
     batch_results = await asyncio.gather(
         *[
@@ -407,7 +424,7 @@ async def parse_document(
                 total=total,
                 prompt=prompt,
                 app_config=app_config,
-                model_name=model_name,
+                chat_model=chat_model,
                 semaphore=semaphore,
             )
             for index, chunk in enumerate(batches)

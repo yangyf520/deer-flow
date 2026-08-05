@@ -168,6 +168,7 @@ def test_parse_document_runs_batches_in_parallel(monkeypatch):
         return responses[i]
 
     monkeypatch.setattr(pipeline, "run_oneshot_llm", fake_llm)
+    monkeypatch.setattr(pipeline, "create_chat_model", lambda **kwargs: object())
 
     result = asyncio.run(
         pipeline.parse_document(
@@ -197,6 +198,29 @@ def test_validate_schema_fails():
         pipeline._validate_schema({"other": 1}, schema)
 
 
+def test_to_markdown_text_fast_path():
+    parsed, backend = pipeline._to_markdown(b"# Title\n\nbody", "law.md")
+    assert backend == "text"
+    assert parsed.parse_quality == "ok"
+    assert "Title" in parsed.text
+
+
+def test_to_markdown_docx_prefers_markitdown(monkeypatch):
+    monkeypatch.setattr(
+        pipeline,
+        "parse_markitdown_bytes",
+        lambda data, filename: ParseResult(text="**第1条** 内容", parse_quality="ok"),
+    )
+
+    def fail_docling(*args, **kwargs):
+        raise AssertionError("Docling should not run when MarkItDown succeeds")
+
+    monkeypatch.setattr(pipeline, "parse_file_bytes_with_fallback", fail_docling)
+    parsed, backend = pipeline._to_markdown(b"docx-bytes", "law.docx")
+    assert backend == "markitdown"
+    assert parsed.text.startswith("**第1条**")
+
+
 def test_parse_document_happy_path(monkeypatch):
     monkeypatch.setattr(
         pipeline,
@@ -224,6 +248,7 @@ def test_parse_document_happy_path(monkeypatch):
         return responses[i]
 
     monkeypatch.setattr(pipeline, "run_oneshot_llm", fake_llm)
+    monkeypatch.setattr(pipeline, "create_chat_model", lambda **kwargs: object())
 
     result = asyncio.run(
         pipeline.parse_document(

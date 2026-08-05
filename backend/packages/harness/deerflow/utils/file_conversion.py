@@ -17,6 +17,7 @@ No FastAPI or HTTP dependencies — pure utility functions.
 import asyncio
 import logging
 import re
+import threading
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -25,6 +26,11 @@ from typing import Any
 from deerflow.config.app_config import get_app_config
 
 logger = logging.getLogger(__name__)
+
+_docling_converter: Any | None = None
+_docling_converter_lock = threading.Lock()
+_markitdown_instance: Any | None = None
+_markitdown_lock = threading.Lock()
 
 DATA_URI = re.compile(
     r"data:(?:image|application)/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]{64,}",
@@ -47,15 +53,40 @@ def sanitize_media(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
+def _get_docling_converter() -> Any:
+    """Reuse one ``DocumentConverter`` — cold start loads layout/OCR models once."""
+    global _docling_converter
+    if _docling_converter is not None:
+        return _docling_converter
+    with _docling_converter_lock:
+        if _docling_converter is None:
+            from docling.document_converter import DocumentConverter
+
+            _docling_converter = DocumentConverter()
+        return _docling_converter
+
+
+def _get_markitdown() -> Any:
+    global _markitdown_instance
+    if _markitdown_instance is not None:
+        return _markitdown_instance
+    with _markitdown_lock:
+        if _markitdown_instance is None:
+            from markitdown import MarkItDown
+
+            _markitdown_instance = MarkItDown()
+        return _markitdown_instance
+
+
 def parse_docling(source: Any) -> ParseResult:
     """Convert via Docling ``DocumentConverter`` (path, URL, or DocumentStream)."""
     try:
-        from docling.document_converter import DocumentConverter
+        from docling.document_converter import DocumentConverter  # noqa: F401
     except ImportError:
         return ParseResult(text="", parse_quality="failed", error="Docling is not installed")
 
     try:
-        text = sanitize_media(DocumentConverter().convert(source).document.export_to_markdown())
+        text = sanitize_media(_get_docling_converter().convert(source).document.export_to_markdown())
         if not text:
             return ParseResult(text="", parse_quality="failed", error="empty Docling output")
         return ParseResult(text=text, parse_quality="ok")
@@ -69,7 +100,7 @@ def parse_markitdown_bytes(data: bytes, filename: str) -> ParseResult:
     import tempfile
 
     try:
-        from markitdown import MarkItDown
+        from markitdown import MarkItDown  # noqa: F401
     except ImportError:
         return ParseResult(text="", parse_quality="failed", error="MarkItDown is not installed")
 
@@ -79,7 +110,7 @@ def parse_markitdown_bytes(data: bytes, filename: str) -> ParseResult:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(data)
             path = Path(tmp.name)
-        text = (MarkItDown().convert(str(path)).text_content or "").strip()
+        text = (_get_markitdown().convert(str(path)).text_content or "").strip()
         if not text:
             return ParseResult(text="", parse_quality="failed", error="empty MarkItDown output")
         return ParseResult(text=text, parse_quality="ok")
