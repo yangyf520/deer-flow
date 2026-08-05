@@ -851,9 +851,9 @@ async def test_search_applies_scenario_pack():
                 "deerflow.knowledge.service.list_accessible_spaces",
                 new=AsyncMock(return_value=[space]),
             ),
-            patch("deerflow.knowledge.service.search_space") as search_space,
+            patch("deerflow.knowledge.service.search_one_space") as search_one_space,
         ):
-            search_space.return_value = [
+            search_one_space.return_value = [
                 {
                     "id": "n1",
                     "source": "chunk",
@@ -871,26 +871,22 @@ async def test_search_applies_scenario_pack():
                 system_role="user",
                 query="E4级产品",
                 spaces=["legal"],
-                kinds=None,
                 top_k=None,
                 scenario=None,
             )
             assert len(pack.items) == 1
-            # No lanes → single path with scenario top_k / score
-            assert search_space.call_args.kwargs["kinds"] is None
-            assert search_space.call_args.kwargs["top_k"] == 10
-            assert search_space.call_args.kwargs["similarity_cutoff"] == 0.3
-            assert search_space.call_args.kwargs["fusion_queries"] == 1
+            assert search_one_space.call_args.kwargs["top_k"] == 10
+            assert search_one_space.call_args.kwargs["similarity_cutoff"] == 0.3
+            assert search_one_space.call_args.kwargs["fusion_queries"] == 1
     finally:
         set_knowledge_config(prev)
 
 
 @pytest.mark.asyncio
-async def test_search_merges_scenario_lanes():
+async def test_search_merges_parallel_spaces():
     from deerflow.config.knowledge_config import (
         KnowledgeConfig,
         KnowledgeScenarioConfig,
-        ScenarioLaneConfig,
         get_knowledge_config,
         set_knowledge_config,
     )
@@ -905,57 +901,49 @@ async def test_search_merges_scenario_lanes():
                     top_k=4,
                     score=0.3,
                     merge_mode="slot_then_rrf",
-                    lanes=[
-                        ScenarioLaneConfig(kinds=["policy"], tags=["statute"], budget=2),
-                        ScenarioLaneConfig(kinds=["case"], budget=2),
-                    ],
                 )
             ]
         )
     )
-    space = SimpleNamespace(id="legal", default_scenarios=["policy-review"])
+    spaces = [
+        SimpleNamespace(id="legal", default_scenarios=["policy-review"]),
+        SimpleNamespace(id="company", default_scenarios=["policy-review"]),
+    ]
 
-    async def _fake_lane(_session, *, lane, **kwargs):
-        item = {
-            "id": f"{lane.id}-1",
-            "source": "chunk",
-            "kind": lane.kinds[0],
-            "title": lane.id,
-            "snippet": "s",
-            "score": 0.9,
-            "metadata": {},
-        }
-        return {
-            "lane_id": lane.id,
-            "hit_count": 1,
-            "items": [item],
-            "trace_id": "t-lane",
-            "knowledge_version": "kv",
-            "fallback": None,
-            "optional": False,
-        }
+    def _fake_space(*, space_id, **kwargs):
+        return [
+            {
+                "id": f"{space_id}-1",
+                "source": "chunk",
+                "kind": "policy",
+                "title": space_id,
+                "snippet": "s",
+                "score": 0.9,
+                "metadata": {"space_id": space_id},
+            }
+        ]
 
     try:
         with (
             patch(
                 "deerflow.knowledge.service.list_accessible_spaces",
-                new=AsyncMock(return_value=[space]),
+                new=AsyncMock(return_value=spaces),
             ),
-            patch("deerflow.knowledge.service.search_lane", new=AsyncMock(side_effect=_fake_lane)),
+            patch("deerflow.knowledge.service.search_one_space", side_effect=_fake_space),
         ):
             pack = await knowledge_service.search(
                 AsyncMock(),
                 user_id="u1",
                 system_role="user",
                 query="clause",
-                spaces=["legal"],
-                kinds=None,
+                spaces=["legal", "company"],
                 top_k=None,
                 scenario="policy-review",
             )
-        assert {it.id for it in pack.items} == {"policy:statute-1", "case-1"}
+        assert {it.id for it in pack.items} == {"legal-1", "company-1"}
         assert pack.metadata.get("merge_mode") == "slot_then_rrf"
-        assert len(pack.metadata.get("lanes") or []) == 2
+        assert len(pack.metadata.get("spaces") or []) == 2
+        assert len(pack.metadata.get("space_results") or []) == 2
     finally:
         set_knowledge_config(prev)
 
@@ -970,7 +958,7 @@ async def test_search_empty_spaces_returns_no_hits():
             "deerflow.knowledge.service.list_accessible_spaces",
             new=AsyncMock(return_value=[space]),
         ),
-        patch("deerflow.knowledge.service.search_space") as search_space,
+        patch("deerflow.knowledge.service.search_one_space") as search_one_space,
     ):
         pack = await knowledge_service.search(
             AsyncMock(),
@@ -978,12 +966,11 @@ async def test_search_empty_spaces_returns_no_hits():
             system_role="user",
             query="hello",
             spaces=[],
-            kinds=None,
             top_k=None,
             scenario=None,
         )
         assert pack.items == []
-        search_space.assert_not_called()
+        search_one_space.assert_not_called()
 
 
 def test_set_agent_knowledge_defaults_empty_spaces():
@@ -1031,42 +1018,6 @@ def test_knowledge_scope_without_agent_keeps_request():
     )
 
 
-def test_list_configured_kinds_returns_ids():
-    from deerflow.config.knowledge_config import (
-        KnowledgeConfig,
-        KnowledgeKindConfig,
-        KnowledgeScenarioConfig,
-        ScenarioLaneConfig,
-        get_knowledge_config,
-        set_knowledge_config,
-    )
-    from deerflow.knowledge.service import list_configured_kinds
-
-    prev = get_knowledge_config()
-    try:
-        set_knowledge_config(
-            KnowledgeConfig(
-                kinds=[],
-                scenarios=[
-                    KnowledgeScenarioConfig(
-                        type="policy-review",
-                        lanes=[
-                            ScenarioLaneConfig(kinds=["policy"]),
-                            ScenarioLaneConfig(kinds=["case"]),
-                        ],
-                    )
-                ],
-            )
-        )
-        items = list_configured_kinds()
-        assert {k.id for k in items} == {"policy", "case"}
-
-        set_knowledge_config(KnowledgeConfig(kinds=[KnowledgeKindConfig(id="custom-only")], scenarios=[]))
-        assert [k.id for k in list_configured_kinds()] == ["custom-only"]
-    finally:
-        set_knowledge_config(prev)
-
-
 def test_ensure_kind_allowed_respects_space_whitelist():
     from fastapi import HTTPException
 
@@ -1097,66 +1048,6 @@ def test_kinds_api_lists_catalog():
         assert body["total"] == len(body["items"])
 
 
-def test_list_configured_tag_groups_explicit():
-    from deerflow.config.knowledge_config import (
-        KnowledgeConfig,
-        KnowledgeTagGroupConfig,
-        get_knowledge_config,
-        set_knowledge_config,
-    )
-    from deerflow.knowledge.service import list_configured_tag_groups
-
-    prev = get_knowledge_config()
-    try:
-        set_knowledge_config(
-            KnowledgeConfig(
-                tag_groups=[
-                    KnowledgeTagGroupConfig(id="national", tags=["statute", "national-law"]),
-                    KnowledgeTagGroupConfig(id="company", tags=["company-policy"]),
-                ],
-            )
-        )
-        groups = list_configured_tag_groups()
-        assert [g.id for g in groups] == ["national", "company"]
-        assert groups[0].tags == ["statute", "national-law"]
-    finally:
-        set_knowledge_config(prev)
-
-
-def test_list_configured_tag_groups_derived_from_lanes():
-    from deerflow.config.knowledge_config import (
-        KnowledgeConfig,
-        KnowledgeScenarioConfig,
-        ScenarioLaneConfig,
-        get_knowledge_config,
-        set_knowledge_config,
-    )
-    from deerflow.knowledge.service import list_configured_tag_groups
-
-    prev = get_knowledge_config()
-    try:
-        set_knowledge_config(
-            KnowledgeConfig(
-                scenarios=[
-                    KnowledgeScenarioConfig(
-                        type="policy-review",
-                        lanes=[
-                            ScenarioLaneConfig(kinds=["policy"], tags=["statute", "national-law"]),
-                            ScenarioLaneConfig(kinds=["policy"], tags=["company-policy"]),
-                        ],
-                    )
-                ],
-            )
-        )
-        groups = list_configured_tag_groups()
-        assert len(groups) == 2
-        tag_sets = {tuple(g.tags) for g in groups}
-        assert ("company-policy",) in tag_sets
-        assert ("national-law", "statute") in tag_sets
-    finally:
-        set_knowledge_config(prev)
-
-
 def test_knowledge_catalog_api():
     client = TestClient(_api_app())
     res = client.get(
@@ -1171,53 +1062,57 @@ def test_knowledge_catalog_api():
             assert isinstance(body[key], list)
 
 
-class TestKnowledgeLanes:
-    """Scenario lane resolve + slot/RRF merge (orchestration only; retrieval uses LlamaIndex)."""
+class TestKnowledgeSpaceMerge:
+    """Per-space parallel retrieval merge (orchestration only)."""
 
-    def test_resolve_lanes_from_config(self):
-        from deerflow.config.knowledge_config import KnowledgeScenarioConfig, ScenarioLaneConfig
-        from deerflow.knowledge.rag import resolve_lanes
+    def test_space_budgets_even_split(self):
+        from deerflow.knowledge.rag import space_budgets
 
-        scenario = KnowledgeScenarioConfig(
-            type="policy-review",
-            top_k=10,
-            lanes=[
-                ScenarioLaneConfig(kinds=["policy"], tags=["statute"], budget=4),
-                ScenarioLaneConfig(kinds=["case"]),
-            ],
-        )
-        lanes = resolve_lanes(scenario, top_k=10)
-        assert lanes[0].budget == 4
-        assert lanes[1].budget == 10
-        assert lanes[0].tags == ["statute"]
+        assert space_budgets(2, 10) == [5, 5]
+        assert space_budgets(3, 10) == [4, 3, 3]
 
-    def test_scenario_kind_ids_from_lanes(self):
-        from deerflow.config.knowledge_config import KnowledgeScenarioConfig, ScenarioLaneConfig
-        from deerflow.knowledge.rag import scenario_kind_ids
-
-        scenario = KnowledgeScenarioConfig(
-            type="policy-review",
-            lanes=[
-                ScenarioLaneConfig(kinds=["policy"], tags=["statute"]),
-                ScenarioLaneConfig(kinds=["policy"], tags=["company-policy"]),
-                ScenarioLaneConfig(kinds=["reference"]),
-                ScenarioLaneConfig(kinds=["case"]),
-            ],
-        )
-        assert scenario_kind_ids(scenario) == ["policy", "reference", "case"]
-        assert scenario_kind_ids(KnowledgeScenarioConfig(type="general-qa")) == []
-
-    def test_merge_slot_then_rrf_keeps_weak_lane(self):
-        from deerflow.knowledge.rag import merge_lane_hits
+    def test_merge_slot_then_rrf_keeps_each_space(self):
+        from deerflow.knowledge.rag import merge_space_hits
 
         buckets = [
-            ("statute", [{"id": "law-1", "score": 0.95}], 4),
+            ("legal", [{"id": "law-1", "score": 0.95}], 4),
             ("company", [{"id": "co-1", "score": 0.94}], 3),
             ("reference", [{"id": "ref-1", "score": 0.93}], 2),
             ("case", [{"id": "case-1", "score": 0.40}], 3),
         ]
-        merged = merge_lane_hits(buckets, final_top_k=4, merge_mode="slot_then_rrf")
+        merged = merge_space_hits(buckets, final_top_k=4, merge_mode="slot_then_rrf")
         assert {x["id"] for x in merged} == {"law-1", "co-1", "ref-1", "case-1"}
+
+    def test_per_doc_merge_from_pooled_hits(self):
+        from deerflow.knowledge.rag import _merge_items_by_doc_buckets
+
+        pooled = [
+            {"id": "a1", "score": 0.99, "metadata": {"doc_id": "doc-a"}},
+            {"id": "a2", "score": 0.98, "metadata": {"doc_id": "doc-a"}},
+            {"id": "b1", "score": 0.50, "metadata": {"doc_id": "doc-b"}},
+        ]
+        merged = _merge_items_by_doc_buckets(pooled, final_top_k=2, merge_mode="slot_then_rrf")
+        assert {x["id"] for x in merged} == {"a1", "b1"}
+
+    def test_search_one_space_per_doc_parallel(self):
+        from unittest.mock import patch
+
+        from deerflow.knowledge import rag
+
+        def _fake_retrieve(**kwargs):
+            doc_id = kwargs.get("doc_id")
+            if doc_id == "doc-a":
+                return [{"id": "a1", "score": 0.9, "metadata": {"doc_id": "doc-a", "space_id": "legal"}}]
+            if doc_id == "doc-b":
+                return [{"id": "b1", "score": 0.4, "metadata": {"doc_id": "doc-b", "space_id": "legal"}}]
+            return []
+
+        with (
+            patch.object(rag, "list_space_doc_ids", return_value=["doc-a", "doc-b"]),
+            patch.object(rag, "_retrieve_space_items", side_effect=_fake_retrieve),
+        ):
+            out = rag.search_one_space(space_id="legal", query="q", top_k=2)
+        assert {x["id"] for x in out} == {"a1", "b1"}
 
     def test_evaluate_search_cases_needle_hit(self):
         from unittest.mock import patch
@@ -1225,7 +1120,7 @@ class TestKnowledgeLanes:
         from deerflow.knowledge.rag import evaluate_search_cases
 
         with patch(
-            "deerflow.knowledge.rag.search_space",
+            "deerflow.knowledge.rag.search_spaces",
             return_value=[{"snippet": "合规要求说明", "metadata": {"doc_id": "d1", "release": "current"}}],
         ):
             result = evaluate_search_cases(
@@ -1411,6 +1306,6 @@ def test_search_space_returns_custom_chunk_metadata():
         cfg.return_value.retrieval.snippet_max_chars = 500
         cfg.return_value.retrieval.hybrid = False
         cfg.return_value.retrieval.rerank = False
-        items = rag.search_space(space_ids=["legal"], query="test")
+        items = rag.search_spaces(space_ids=["legal"], query="test", final_top_k=5, pool_k=5)
     assert items[0]["metadata"]["row_no"] == 7
     assert items[0]["metadata"]["batch_id"] == "b-1"

@@ -135,7 +135,7 @@ async def list_kinds(request: Request) -> KindsListResponse:
 @require_auth
 @require_permission("knowledge", "write")
 async def upsert_scenario(code: str, body: knowledge_service.ScenarioDefinitionRequest, request: Request) -> ScenarioPackResponse:
-    """Create or update a knowledge scenario (code + label + lanes)."""
+    """Create or update a knowledge scenario (code + label + retrieval profile)."""
     user = _user(request)
     if body.code != code:
         raise HTTPException(status_code=422, detail="scenario code in path and body must match")
@@ -152,8 +152,6 @@ async def upsert_scenario(code: str, body: knowledge_service.ScenarioDefinitionR
             description=body.description,
             merge_mode=body.merge_mode,
             fusion_num_queries=body.fusion_num_queries,
-            kinds=body.kinds,
-            lanes=[lane.model_dump(exclude_none=True) for lane in body.lanes],
             host_space_id=body.host_space_id,
             created_by=_uid(user),
         )
@@ -539,8 +537,6 @@ async def search(body: KnowledgeSearchRequest, request: Request) -> EvidencePack
             system_role=user.system_role,
             query=body.query,
             spaces=body.spaces,
-            kinds=body.kinds,
-            tags=body.tags,
             top_k=body.top_k,
             knowledge_version=body.knowledge_version,
             scenario=body.scenario,

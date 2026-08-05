@@ -1,7 +1,7 @@
 """Knowledge RAG: Docling parse + LlamaIndex ingest/retrieve (library assembly).
 
 Prefer LlamaIndex / Docling via config ``use:`` paths; this module is glue +
-business filters (lanes, temporal), not hand-rolled RAG algorithms.
+business filters (temporal ranking), not hand-rolled RAG algorithms.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import os
 import re
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -58,8 +58,7 @@ EVIDENCE_SYSTEM_METADATA_KEYS = RESERVED_CHUNK_METADATA_KEYS | frozenset(
         "asset_uri",
         "scenario",
         "spaces_searched",
-        "lane_id",
-        "lane_fallback",
+        "recall_path",
         "source_filename",
         "doc_title",
         "article_no",
@@ -196,9 +195,6 @@ def format_evidence_snippet(text: str, query: str, *, max_chars: int = 1200) -> 
     if end < len(cleaned):
         excerpt = excerpt.rstrip() + "…"
     return excerpt[: max_chars + 2]
-
-
-# ── store (LlamaIndex VectorStore / embed / docstore) ───────────────────────
 
 
 # ── store (LlamaIndex VectorStore / embed / docstore) ───────────────────────
@@ -1296,18 +1292,9 @@ def rank_by_temporal(
     return filtered
 
 
-# ── scenario lanes ───────────────────────────────────────────────────────────
+# ── multi-space merge ─────────────────────────────────────────────────────────
 
 _RRF_K = 60
-
-
-@dataclass(frozen=True)
-class ResolvedLane:
-    id: str
-    kinds: list[str]
-    tags: list[str] = field(default_factory=list)
-    budget: int = 8
-    optional: bool = False
 
 
 def get_scenario_config(scenario_id: str | None) -> KnowledgeScenarioConfig:
@@ -1329,72 +1316,12 @@ def get_scenario_config(scenario_id: str | None) -> KnowledgeScenarioConfig:
     return item
 
 
-def resolve_lanes(
-    scenario: KnowledgeScenarioConfig,
-    *,
-    top_k: int | None = None,
-) -> list[ResolvedLane]:
-    final_top_k = max(1, int(top_k if top_k is not None else scenario.top_k or 8))
-
-    if scenario.lanes:
-        out: list[ResolvedLane] = []
-        for index, lane in enumerate(scenario.lanes):
-            kinds = [k for k in (lane.kinds or []) if k]
-            if not kinds:
-                continue
-            lid = (lane.id or "").strip() or _lane_id(kinds, lane.tags, index)
-            budget = lane.budget if lane.budget is not None else final_top_k
-            out.append(
-                ResolvedLane(
-                    id=lid,
-                    kinds=kinds,
-                    tags=[t for t in (lane.tags or []) if t],
-                    budget=max(1, int(budget)),
-                    optional=bool(lane.optional),
-                )
-            )
-        return out
-
-    shorthand = [k for k in (scenario.kinds or []) if k]
-    if not shorthand:
+def space_budgets(space_count: int, final_top_k: int) -> list[int]:
+    if space_count <= 0:
         return []
-
-    base, rem = divmod(final_top_k, len(shorthand))
-    lanes: list[ResolvedLane] = []
-    for index, kind in enumerate(shorthand):
-        budget = base + (1 if index < rem else 0)
-        lanes.append(
-            ResolvedLane(
-                id=kind,
-                kinds=[kind],
-                tags=[],
-                budget=max(1, budget),
-            )
-        )
-    return lanes
-
-
-def scenario_kind_ids(scenario: KnowledgeScenarioConfig) -> list[str]:
-    seen: list[str] = []
-    for lane in resolve_lanes(scenario):
-        for kind in lane.kinds:
-            if kind and kind not in seen:
-                seen.append(kind)
-    return seen
-
-
-def lane_pool_k(budget: int, *, has_tags: bool) -> int:
-    if not has_tags:
-        return max(1, budget)
-    return min(max(budget + 4, budget * 2), 40)
-
-
-def _lane_id(kinds: list[str], tags: list[str], index: int) -> str:
-    if tags:
-        return f"{'-'.join(kinds)}:{'-'.join(tags)}"
-    if kinds:
-        return kinds[0] if len(kinds) == 1 else "-".join(kinds)
-    return f"lane-{index}"
+    k = max(1, int(final_top_k))
+    base, rem = divmod(k, space_count)
+    return [base + (1 if index < rem else 0) for index in range(space_count)]
 
 
 def item_id(item: dict[str, Any]) -> str:
@@ -1410,16 +1337,17 @@ def stable_rank_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(items, key=lambda it: (-item_score(it), item_id(it)))
 
 
-def merge_lane_hits(
+def merge_space_hits(
     buckets: list[tuple[str, list[dict[str, Any]], int]],
     *,
     final_top_k: int,
     merge_mode: str = "slot_then_rrf",
 ) -> list[dict[str, Any]]:
+    """Merge per-bucket retrieval (space or document): slot guarantee + RRF backfill."""
     mode = (merge_mode or "slot_then_rrf").strip().lower()
     if mode == "score":
         by_id: dict[str, dict[str, Any]] = {}
-        for _lane_id, items, _budget in buckets:
+        for _space_id, items, _budget in buckets:
             for it in items:
                 iid = item_id(it)
                 if not iid:
@@ -1432,7 +1360,7 @@ def merge_lane_hits(
     picked: list[dict[str, Any]] = []
     picked_ids: set[str] = set()
 
-    for lane_id, items, budget in buckets:
+    for bucket_id, items, budget in buckets:
         if not items:
             continue
         slot_take = min(max(1, min(2, budget)), len(items))
@@ -1442,7 +1370,7 @@ def merge_lane_hits(
                 continue
             copy = dict(it)
             meta = dict(copy.get("metadata") or {})
-            meta["lane_id"] = lane_id
+            meta.setdefault("recall_path", bucket_id)
             copy["metadata"] = meta
             picked.append(copy)
             picked_ids.add(iid)
@@ -1453,7 +1381,7 @@ def merge_lane_hits(
 
     rrf: dict[str, float] = {}
     item_by_id: dict[str, dict[str, Any]] = {}
-    for lane_id, items, _budget in buckets:
+    for _space_id, items, _budget in buckets:
         for rank, it in enumerate(stable_rank_items(items)):
             iid = item_id(it)
             if not iid or iid in picked_ids:
@@ -1501,7 +1429,7 @@ def resolve_scenario(
     return get_scenario_pack(default_scenario_code())
 
 
-def _build_retriever(*, space_id: str, retrieve_n: int, num_queries: int):
+def _build_retriever(*, space_id: str, retrieve_n: int, num_queries: int, doc_id: str | None = None):
     from llama_index.core import StorageContext, VectorStoreIndex
     from llama_index.core.retrievers import AutoMergingRetriever, QueryFusionRetriever
     from llama_index.core.vector_stores import FilterOperator, MetadataFilter, MetadataFilters
@@ -1521,9 +1449,12 @@ def _build_retriever(*, space_id: str, retrieve_n: int, num_queries: int):
         embed_model=get_embed_model(),
         storage_context=storage_context,
     )
-    filters = MetadataFilters(filters=[MetadataFilter(key="space_id", value=space_id, operator=FilterOperator.EQ)])
-    retrievers: list[Any] = [index.as_retriever(similarity_top_k=retrieve_n, filters=filters)]
-    if cfg.bm25:
+    filters = [MetadataFilter(key="space_id", value=space_id, operator=FilterOperator.EQ)]
+    if doc_id:
+        filters.append(MetadataFilter(key="doc_id", value=doc_id, operator=FilterOperator.EQ))
+    metadata_filters = MetadataFilters(filters=filters)
+    retrievers: list[Any] = [index.as_retriever(similarity_top_k=retrieve_n, filters=metadata_filters)]
+    if cfg.bm25 and not doc_id:
         try:
             n_docs = max(1, len(getattr(docstore, "docs", {}) or {}))
             bm25_k = min(retrieve_n, n_docs)
@@ -1595,138 +1526,309 @@ def _apply_score_cutoff(nodes: list, cutoff: float | None) -> list:
     return kept
 
 
-def parse_tags_value(raw: Any) -> set[str]:
-    if raw is None:
-        return set()
-    if isinstance(raw, list):
-        return {str(t).strip() for t in raw if str(t).strip()}
-    return {t.strip() for t in str(raw).split(",") if t.strip()}
+def list_space_doc_ids(space_id: str, *, release: str = "current") -> list[str]:
+    """Distinct knowledge document ids indexed in a space (respects release filter)."""
+    docstore = load_docstore(space_id)
+    seen: list[str] = []
+    for node in getattr(docstore, "docs", {}).values():
+        meta = dict(getattr(node, "metadata", None) or {})
+        if not _release_matches(meta, release):
+            continue
+        did = str(meta.get("doc_id") or "").strip()
+        if did and did not in seen:
+            seen.append(did)
+    return seen
 
 
-def metadata_tags_match(meta: dict[str, Any], want_tags: list[str]) -> bool:
-    want = {t.strip() for t in want_tags if t.strip()}
-    if not want:
-        return True
-    have = parse_tags_value(meta.get("tags"))
-    return bool(have & want)
+def _nodes_to_evidence_items(
+    nodes: list,
+    *,
+    space_id: str,
+    query: str,
+    snippet_max: int,
+    want_release: str,
+) -> list[dict]:
+    from llama_index.core.schema import NodeRelationship
+
+    items: list[dict] = []
+    seen: set[str] = set()
+    for n in nodes:
+        node_obj = getattr(n, "node", n)
+        meta = dict(getattr(node_obj, "metadata", None) or {})
+        if not _release_matches(meta, want_release):
+            continue
+        pid = getattr(node_obj, "node_id", None) or str(id(n))
+        if pid in seen:
+            continue
+        seen.add(pid)
+        raw_snippet = n.get_content() if hasattr(n, "get_content") else getattr(node_obj, "text", str(n))
+        snippet = format_evidence_snippet(str(raw_snippet or ""), query, max_chars=snippet_max)
+        title = meta.get("title") or ""
+        heading = meta.get("heading_path") or ""
+        parent_id = meta.get("parent_id")
+        rel = getattr(node_obj, "relationships", None) or {}
+        parent_info = rel.get(NodeRelationship.PARENT)
+        if parent_info is not None and parent_id is None:
+            parent_id = getattr(parent_info, "node_id", None)
+        block = meta.get("block") or annotate_block_type(str(raw_snippet or ""))
+        evidence_meta: dict[str, Any] = {
+            "space_id": meta.get("space_id") or space_id,
+            "doc_id": meta.get("doc_id"),
+            "block": block,
+            "heading_path": heading or None,
+            "parent_id": parent_id,
+            "page_no": meta.get("page_no"),
+            "asset_uri": meta.get("asset_uri"),
+        }
+        evidence_meta.update(custom_metadata_from_chunk(meta))
+        items.append(
+            {
+                "id": pid,
+                "source": "chunk",
+                "kind": meta.get("kind", "general"),
+                "title": title or heading or "",
+                "snippet": snippet,
+                "score": float(n.score or 0),
+                "citable_as": f"{title} / {heading}".strip(" /") if heading else title,
+                "metadata": evidence_meta,
+            }
+        )
+    return items
 
 
-def search_space(
+def _retrieve_document_nodes(
+    *,
+    space_id: str,
+    query: str,
+    retrieve_n: int,
+    want_queries: int,
+    doc_id: str | None = None,
+) -> list:
+    """Hybrid retrieve nodes for a whole space or one document."""
+    global _fusion_llm_disabled
+
+    try:
+        retriever = _build_retriever(
+            space_id=space_id,
+            retrieve_n=retrieve_n,
+            num_queries=want_queries,
+            doc_id=doc_id,
+        )
+        return list(retriever.retrieve(query))
+    except Exception as exc:
+        if want_queries > 1:
+            _fusion_llm_disabled = True
+            label = doc_id or space_id
+            logger.warning(
+                "Retrieve with fusion failed for %s (%s); disable multi-query and retry num_queries=1",
+                label,
+                exc,
+            )
+            try:
+                retriever = _build_retriever(
+                    space_id=space_id,
+                    retrieve_n=retrieve_n,
+                    num_queries=1,
+                    doc_id=doc_id,
+                )
+                return list(retriever.retrieve(query))
+            except Exception as exc2:
+                logger.warning("Retrieve failed for %s: %s", label, exc2)
+                return []
+        label = doc_id or space_id
+        logger.warning("Retrieve failed for %s: %s", label, exc)
+        return []
+
+
+def _retrieve_space_items(
+    *,
+    space_id: str,
+    query: str,
+    top_k: int,
+    similarity_cutoff: float | None,
+    release: str,
+    fusion_queries: int | None,
+    doc_id: str | None = None,
+) -> list[dict]:
+    cfg = get_knowledge_config().retrieval
+    k = max(1, int(top_k))
+    retrieve_n = max(cfg.retrieve_n, k)
+    cutoff = cfg.similarity_cutoff if similarity_cutoff is None else similarity_cutoff
+    snippet_max = int(cfg.snippet_max_chars or 1200)
+    want_release = release or "current"
+    if fusion_queries is not None:
+        want_queries = max(1, int(fusion_queries))
+    else:
+        want_queries = 1 if _fusion_llm_disabled else (cfg.fusion_num_queries if cfg.hybrid else 1)
+
+    nodes = _retrieve_document_nodes(
+        space_id=space_id,
+        query=query,
+        retrieve_n=retrieve_n,
+        want_queries=want_queries,
+        doc_id=doc_id,
+    )
+    reranked = False
+    if cfg.rerank and cfg.rerank_model:
+        try:
+            rerank_n = int(cfg.rerank_top_n or 0) or max(k * 2, k)
+            nodes = _apply_rerank(nodes, query=query, top_n=rerank_n)
+            reranked = True
+        except Exception as exc:
+            label = doc_id or space_id
+            logger.warning("Rerank skipped for %s: %s", label, exc)
+    if reranked or not (cfg.hybrid and (cfg.fusion_mode or "").lower().startswith("reciprocal")):
+        nodes = _apply_score_cutoff(nodes, cutoff)
+    items = _nodes_to_evidence_items(
+        nodes,
+        space_id=space_id,
+        query=query,
+        snippet_max=snippet_max,
+        want_release=want_release,
+    )
+    return stable_rank_items(items)[:k]
+
+
+def _merge_items_by_doc_buckets(
+    items: list[dict],
+    *,
+    final_top_k: int,
+    merge_mode: str,
+) -> list[dict]:
+    by_doc: dict[str, list[dict]] = {}
+    for it in items:
+        did = str((it.get("metadata") or {}).get("doc_id") or "").strip()
+        if did:
+            by_doc.setdefault(did, []).append(it)
+    if len(by_doc) <= 1:
+        return stable_rank_items(items)[:final_top_k]
+    doc_ids = sorted(by_doc.keys())
+    budgets = space_budgets(len(doc_ids), final_top_k)
+    buckets = [(did, by_doc[did], budget) for did, budget in zip(doc_ids, budgets)]
+    return merge_space_hits(buckets, final_top_k=final_top_k, merge_mode=merge_mode)
+
+
+def search_one_space(
+    *,
+    space_id: str,
+    query: str,
+    top_k: int,
+    similarity_cutoff: float | None = None,
+    release: str = "current",
+    fusion_queries: int | None = None,
+    merge_mode: str = "slot_then_rrf",
+) -> list[dict]:
+    """Retrieve from one space; parallel per-document paths when multiple files are indexed."""
+    cfg = get_knowledge_config().retrieval
+    k = max(1, int(top_k))
+    want_release = release or "current"
+    doc_ids = list_space_doc_ids(space_id, release=want_release)
+    use_per_doc = bool(cfg.per_doc_merge) and len(doc_ids) > 1
+
+    if not use_per_doc:
+        return _retrieve_space_items(
+            space_id=space_id,
+            query=query,
+            top_k=k,
+            similarity_cutoff=similarity_cutoff,
+            release=want_release,
+            fusion_queries=fusion_queries,
+        )
+
+    max_docs = max(1, int(cfg.max_doc_paths or 32))
+    per_doc_pool = max(2, min(cfg.retrieve_n, k * 2))
+
+    if len(doc_ids) > max_docs:
+        pool = max(k * 2, cfg.retrieve_n, len(doc_ids))
+        pooled = _retrieve_space_items(
+            space_id=space_id,
+            query=query,
+            top_k=pool,
+            similarity_cutoff=similarity_cutoff,
+            release=want_release,
+            fusion_queries=fusion_queries,
+        )
+        return _merge_items_by_doc_buckets(pooled, final_top_k=k, merge_mode=merge_mode)
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _run(doc_id: str) -> list[dict]:
+        return _retrieve_space_items(
+            space_id=space_id,
+            query=query,
+            top_k=per_doc_pool,
+            similarity_cutoff=similarity_cutoff,
+            release=want_release,
+            fusion_queries=fusion_queries,
+            doc_id=doc_id,
+        )
+
+    max_workers = min(len(doc_ids), 8)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = list(executor.map(_run, doc_ids))
+    budgets = space_budgets(len(doc_ids), k)
+    buckets = [(did, items, budget) for did, items, budget in zip(doc_ids, results, budgets)]
+    merged = merge_space_hits(buckets, final_top_k=k, merge_mode=merge_mode)
+    return merged[:k]
+
+
+def search_spaces(
     *,
     space_ids: list[str],
     query: str,
-    top_k: int | None = None,
-    kinds: list[str] | None = None,
-    tags: list[str] | None = None,
+    final_top_k: int | None = None,
+    pool_k: int | None = None,
     similarity_cutoff: float | None = None,
     as_of_date: str | None = None,
     release_by_space: dict[str, str] | None = None,
     fusion_queries: int | None = None,
+    merge_mode: str = "slot_then_rrf",
 ) -> list[dict]:
-    global _fusion_llm_disabled
-    from llama_index.core.schema import NodeRelationship
+    """Retrieve across spaces; parallel per-space when more than one space."""
+    from concurrent.futures import ThreadPoolExecutor
 
     cfg = get_knowledge_config().retrieval
-    k = top_k or cfg.top_k
-    retrieve_n = max(cfg.retrieve_n, k)
-    cutoff = cfg.similarity_cutoff if similarity_cutoff is None else similarity_cutoff
-    snippet_max = int(cfg.snippet_max_chars or 1200)
-    items: list[dict] = []
-    for space_id in space_ids:
-        want_release = (release_by_space or {}).get(space_id, "current")
-        if fusion_queries is not None:
-            want_queries = max(1, int(fusion_queries))
-        else:
-            want_queries = 1 if _fusion_llm_disabled else (cfg.fusion_num_queries if cfg.hybrid else 1)
-        try:
-            retriever = _build_retriever(
-                space_id=space_id,
-                retrieve_n=retrieve_n,
-                num_queries=want_queries,
-            )
-            nodes = list(retriever.retrieve(query))
-        except Exception as exc:
-            # Query-fusion LLM may be misconfigured; fall back to single-query hybrid.
-            if want_queries > 1:
-                _fusion_llm_disabled = True
-                logger.warning(
-                    "Retrieve with fusion failed for %s (%s); disable multi-query and retry num_queries=1",
-                    space_id,
-                    exc,
-                )
-                try:
-                    retriever = _build_retriever(
-                        space_id=space_id,
-                        retrieve_n=retrieve_n,
-                        num_queries=1,
-                    )
-                    nodes = list(retriever.retrieve(query))
-                except Exception as exc2:
-                    logger.warning("Retrieve failed for %s: %s", space_id, exc2)
-                    continue
-            else:
-                logger.warning("Retrieve failed for %s: %s", space_id, exc)
-                continue
-        # Rerank first — RRF fusion scores are not cosine; cutoff applies to rerank scores.
-        reranked = False
-        if cfg.rerank and cfg.rerank_model:
-            try:
-                rerank_n = int(cfg.rerank_top_n or 0) or max(k * 2, k)
-                nodes = _apply_rerank(nodes, query=query, top_n=rerank_n)
-                reranked = True
-            except Exception as exc:
-                logger.warning("Rerank skipped for %s: %s", space_id, exc)
-        if reranked or not (cfg.hybrid and (cfg.fusion_mode or "").lower().startswith("reciprocal")):
-            nodes = _apply_score_cutoff(nodes, cutoff)
-        seen: set[str] = set()
-        for n in nodes:
-            node_obj = getattr(n, "node", n)
-            meta = dict(getattr(node_obj, "metadata", None) or {})
-            if not _release_matches(meta, want_release):
-                continue
-            if kinds and meta.get("kind") not in kinds:
-                continue
-            if tags and not metadata_tags_match(meta, tags):
-                continue
-            pid = getattr(node_obj, "node_id", None) or str(id(n))
-            if pid in seen:
-                continue
-            seen.add(pid)
-            raw_snippet = n.get_content() if hasattr(n, "get_content") else getattr(node_obj, "text", str(n))
-            snippet = format_evidence_snippet(str(raw_snippet or ""), query, max_chars=snippet_max)
-            title = meta.get("title") or ""
-            heading = meta.get("heading_path") or ""
-            parent_id = meta.get("parent_id")
-            rel = getattr(node_obj, "relationships", None) or {}
-            parent_info = rel.get(NodeRelationship.PARENT)
-            if parent_info is not None and parent_id is None:
-                parent_id = getattr(parent_info, "node_id", None)
-            block = meta.get("block") or annotate_block_type(str(raw_snippet or ""))
-            evidence_meta: dict[str, Any] = {
-                "space_id": meta.get("space_id") or space_id,
-                "doc_id": meta.get("doc_id"),
-                "block": block,
-                "heading_path": heading or None,
-                "parent_id": parent_id,
-                "page_no": meta.get("page_no"),
-                "asset_uri": meta.get("asset_uri"),
-            }
-            evidence_meta.update(custom_metadata_from_chunk(meta))
-            items.append(
-                {
-                    "id": pid,
-                    "source": "chunk",
-                    "kind": meta.get("kind", "general"),
-                    "title": title or heading or "",
-                    "snippet": snippet,
-                    "score": float(n.score or 0),
-                    "citable_as": f"{title} / {heading}".strip(" /") if heading else title,
-                    "metadata": evidence_meta,
-                }
-            )
+    k = max(1, int(final_top_k or cfg.top_k or 8))
+    per_space_pool = max(1, int(pool_k or cfg.retrieve_n or k))
+    if not space_ids:
+        return []
+    if len(space_ids) == 1:
+        sid = space_ids[0]
+        release = (release_by_space or {}).get(sid, "current")
+        items = search_one_space(
+            space_id=sid,
+            query=query,
+            top_k=per_space_pool if pool_k else k,
+            similarity_cutoff=similarity_cutoff,
+            release=release,
+            fusion_queries=fusion_queries,
+            merge_mode=merge_mode,
+        )
+        as_of_dt = parse_as_of(as_of_date)
+        items = rank_by_temporal(items, query=query, as_of=as_of_dt)
+        return stable_rank_items(items)[:k]
+
+    def _run(space_id: str) -> list[dict]:
+        release = (release_by_space or {}).get(space_id, "current")
+        return search_one_space(
+            space_id=space_id,
+            query=query,
+            top_k=per_space_pool,
+            similarity_cutoff=similarity_cutoff,
+            release=release,
+            fusion_queries=fusion_queries,
+            merge_mode=merge_mode,
+        )
+
+    max_workers = min(len(space_ids), 8)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = list(executor.map(_run, space_ids))
+    budgets = space_budgets(len(space_ids), k)
+    buckets = [(sid, items, budget) for sid, items, budget in zip(space_ids, results, budgets)]
+    merged = merge_space_hits(buckets, final_top_k=k, merge_mode=merge_mode)
     as_of_dt = parse_as_of(as_of_date)
-    items = rank_by_temporal(items, query=query, as_of=as_of_dt)
-    return stable_rank_items(items)[:k]
+    merged = rank_by_temporal(merged, query=query, as_of=as_of_dt)
+    return stable_rank_items(merged)[:k]
 
 
 def compute_precision_recall_at_k(
@@ -1779,7 +1881,7 @@ def evaluate_search_cases(
             continue
         needles = [str(n) for n in (raw.get("needles") or []) if n]
         relevant = [str(d) for d in (raw.get("relevant_doc_ids") or raw.get("relevant_ids") or []) if d]
-        hits = search_space(space_ids=space_ids, query=q, top_k=top_k)
+        hits = search_spaces(space_ids=space_ids, query=q, final_top_k=top_k, pool_k=top_k)
         # Prefer doc order as returned (already score-sorted)
         retrieved_docs: list[str] = []
         for h in hits:

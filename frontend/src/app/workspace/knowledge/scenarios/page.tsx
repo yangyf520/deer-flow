@@ -205,8 +205,6 @@ export default function KnowledgeScenariosPage() {
         code: editing.type,
         label: input.label,
         description: editing.description,
-        kinds: editing.kinds,
-        lanes: editing.lanes,
       });
       setEditing(null);
       toast.success(kb.scenarioUpdated);

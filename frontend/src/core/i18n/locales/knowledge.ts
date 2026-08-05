@@ -110,7 +110,6 @@ export type KnowledgeTranslations = {
   fieldKind: string;
   fieldKindHint: string;
   editTags: string;
-  uploadTagsHint: string;
   dedupedNotice: string;
   chunks: string;
   chunksSummary: string;
@@ -305,7 +304,6 @@ export const knowledgeEnUS: KnowledgeTranslations = {
   fieldKind: "Document kind",
   fieldKindHint: "Kind controls parsing and chunking strategy",
   editTags: "Tags",
-  uploadTagsHint: "Optional tags for policy lanes",
   dedupedNotice: "Duplicate upload skipped",
   chunks: "Chunks",
   chunksSummary: "{count} chunks",
@@ -543,7 +541,6 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   fieldKind: "知识分类",
   fieldKindHint: "类型决定解析与分块策略",
   editTags: "文档标签",
-  uploadTagsHint: "制度通道的可选标签",
   dedupedNotice: "已跳过重复上传",
   chunks: "分块",
   chunksSummary: "{count} 个分块",

@@ -26,19 +26,20 @@ from deerflow.knowledge.rag import (
     evaluate_search_cases,
     get_scenario_config,
     ingest_document_text,
-    lane_pool_k,
     merge_custom_metadata,
+    merge_space_hits,
     parse_as_of,
+    rank_by_temporal,
     rename_space_vectors,
     resolve_scenario,
-    scenario_kind_ids,
-    search_space,
+    search_one_space,
+    space_budgets,
+    stable_rank_items,
     sync_document_metadata,
 )
 from deerflow.knowledge.rag import (
     list_document_chunks as rag_list_document_chunks,
 )
-from deerflow.persistence.engine import get_session_factory
 from deerflow.persistence.knowledge.model import (
     KnowledgeDocumentRow,
     KnowledgeGrantRow,
@@ -248,23 +249,12 @@ class SpaceGrantsListResponse(BaseModel):
     total: int
 
 
-class ScenarioLaneResponse(BaseModel):
-    id: str = ""
-    kinds: list[str] = Field(default_factory=list)
-    tags: list[str] = Field(default_factory=list)
-    budget: int | None = None
-    optional: bool = False
-
-
 class ScenarioPackResponse(BaseModel):
     description: str = ""
     type: str
     label: str = ""
     space_id: str = ""
     host_space_id: str = ""
-    # From scenario lanes / shorthand; empty → single-path retrieve (no parallel lanes).
-    kinds: list[str] = Field(default_factory=list)
-    lanes: list[ScenarioLaneResponse] = Field(default_factory=list)
 
 
 class ScenariosListResponse(BaseModel):
@@ -281,8 +271,6 @@ class ScenarioDefinitionRequest(BaseModel):
     description: str = ""
     merge_mode: str = "slot_then_rrf"
     fusion_num_queries: int | None = None
-    kinds: list[str] = Field(default_factory=list)
-    lanes: list[ScenarioLaneResponse] = Field(default_factory=list)
     host_space_id: str | None = None
 
 
@@ -332,98 +320,6 @@ async def get_knowledge_catalog_from_db(session: AsyncSession, *, locale: str = 
 
     raw = await get_catalog(session, locale=locale)
     return KnowledgeCatalogResponse.model_validate(raw)
-
-
-def scenario_to_response(scenario) -> ScenarioPackResponse:
-    from deerflow.config.knowledge_config import KnowledgeScenarioConfig
-    from deerflow.knowledge.rag import scenario_kind_ids
-
-    s: KnowledgeScenarioConfig = scenario
-    return ScenarioPackResponse(
-        description=s.description,
-        type=s.type,
-        kinds=scenario_kind_ids(s),
-        lanes=[
-            ScenarioLaneResponse(
-                id=lane.id,
-                kinds=[k for k in (lane.kinds or []) if k],
-                tags=[t for t in (lane.tags or []) if t],
-                budget=lane.budget,
-                optional=bool(lane.optional),
-            )
-            for lane in (s.lanes or [])
-        ],
-    )
-
-
-def list_configured_tags() -> list[KnowledgeTagResponse]:
-    """Tag ids: explicit YAML catalog, else union of tag_groups and scenario lane tags."""
-    cfg = get_knowledge_config()
-    seen: list[str] = []
-
-    def add(tid: str) -> None:
-        if tid and tid not in seen:
-            seen.append(tid)
-
-    for item in cfg.tags:
-        add(item.id)
-    for group in cfg.tag_groups:
-        for tag in group.tags:
-            add(tag)
-    if not seen:
-        for group in list_configured_tag_groups():
-            for tag in group.tags:
-                add(tag)
-        for scenario in cfg.scenarios:
-            for lane in scenario.lanes or []:
-                for tag in lane.tags or []:
-                    add(str(tag))
-    return [KnowledgeTagResponse(id=tid) for tid in seen]
-
-
-def list_configured_tag_groups() -> list[KnowledgeTagGroupResponse]:
-    """Tag group bundles for UI toggles; explicit YAML, else derive from lane tag sets."""
-    cfg = get_knowledge_config()
-    if cfg.tag_groups:
-        return [KnowledgeTagGroupResponse(id=g.id, tags=[t for t in g.tags if t]) for g in cfg.tag_groups if g.id]
-
-    seen: dict[tuple[str, ...], str] = {}
-    out: list[KnowledgeTagGroupResponse] = []
-    for scenario in cfg.scenarios:
-        for index, lane in enumerate(scenario.lanes or []):
-            tags = tuple(sorted(t for t in (lane.tags or []) if t))
-            if not tags:
-                continue
-            if tags in seen:
-                continue
-            lid = (lane.id or "").strip() or f"lane-{index}"
-            seen[tags] = lid
-            out.append(KnowledgeTagGroupResponse(id=lid, tags=list(tags)))
-    return out
-
-
-def get_knowledge_catalog() -> KnowledgeCatalogResponse:
-    cfg = get_knowledge_config()
-    return KnowledgeCatalogResponse(
-        kinds=list_configured_kinds(),
-        tags=list_configured_tags(),
-        tag_groups=list_configured_tag_groups(),
-        scenarios=[scenario_to_response(s) for s in cfg.scenarios],
-    )
-
-
-def list_configured_kinds() -> list[KnowledgeKindResponse]:
-    """Kind ids for UI: optional YAML catalog, else union of scenario lane kinds."""
-    cfg = get_knowledge_config()
-    ids = [k.id for k in cfg.kinds if k.id]
-    if not ids:
-        seen: list[str] = []
-        for scenario in cfg.scenarios:
-            for kid in scenario_kind_ids(scenario):
-                if kid not in seen:
-                    seen.append(kid)
-        ids = seen
-    return [KnowledgeKindResponse(id=kid) for kid in ids]
 
 
 def ensure_kind_allowed(*, kind: str, space_allowed_kinds: list[str] | None) -> str:
@@ -559,8 +455,6 @@ class DocumentUpdateRequest(BaseModel):
 class KnowledgeSearchRequest(BaseModel):
     query: str = Field(min_length=1)
     spaces: list[str] | None = None
-    kinds: list[str] | None = None
-    tags: list[str] | None = None
     scenario: str | None = None
     top_k: int | None = None
     knowledge_version: str = "current"
@@ -789,33 +683,6 @@ def _resolve_search_space_ids(spaces: list[str] | None, allowed_ids: set[str]) -
     return [s for s in spaces if s in allowed_ids]
 
 
-def _resolve_bound_scenario(scenario: str | None, default_scenarios: list[str] | None = None) -> str:
-    """Legacy sync validate — prefer ``resolve_bound_scenario`` with a DB session."""
-    from deerflow.knowledge.catalog import cached_scenario_codes
-
-    raw = (scenario or "").strip()
-    if not raw and default_scenarios:
-        raw = str(default_scenarios[0] or "").strip()
-    if not raw:
-        raise HTTPException(status_code=422, detail="scenario is required (knowledge scenario code)")
-    cached = cached_scenario_codes()
-    if cached:
-        if raw not in cached:
-            raise HTTPException(
-                status_code=422,
-                detail=f"unknown scenario type {raw!r}; configured: {sorted(cached)}",
-            )
-        return raw
-    cfg = get_knowledge_config().scenario_by_type(raw)
-    if cfg is None:
-        known = [s.type for s in get_knowledge_config().scenarios]
-        raise HTTPException(
-            status_code=422,
-            detail=f"unknown scenario type {raw!r}; configured: {known}",
-        )
-    return raw
-
-
 async def resolve_bound_scenario(
     session: AsyncSession,
     scenario: str | None,
@@ -829,35 +696,17 @@ async def resolve_bound_scenario(
     return await validate_scenario_code(session, raw)
 
 
-def allowed_kinds_for_scenario(scenario_type: str, requested: list[str] | None = None) -> list[str]:
-    """Whitelist for a space: subset of scenario lane kinds (default = all scenario kinds)."""
-    from deerflow.knowledge.catalog import cached_scenario
-    from deerflow.knowledge.rag import scenario_kind_ids
-
+def resolve_space_allowed_kinds(requested: list[str] | None = None) -> list[str]:
+    """Space document kind whitelist: optional YAML catalog + caller subset."""
     cfg = get_knowledge_config()
-    cached = cached_scenario(scenario_type)
-    if cached is not None:
-        scenario_kinds = scenario_kind_ids(cached)
-    else:
-        item = cfg.scenario_by_type(scenario_type)
-        scenario_kinds = scenario_kind_ids(item) if item is not None else []
     want = [k for k in (requested or []) if k]
+    catalog = cfg.configured_kind_ids()
     if not want:
-        return list(scenario_kinds)
-    if not scenario_kinds:
-        catalog = cfg.configured_kind_ids()
-        if catalog:
-            unknown = [k for k in want if k not in catalog]
-            if unknown:
-                raise HTTPException(status_code=422, detail=f"unknown kind(s): {unknown}")
-        return want
-    allow = set(scenario_kinds)
-    bad = [k for k in want if k not in allow]
-    if bad:
-        raise HTTPException(
-            status_code=422,
-            detail=f"kind(s) {bad} not in scenario '{scenario_type}' lanes (allowed={scenario_kinds})",
-        )
+        return list(catalog) if catalog else ["general"]
+    if catalog:
+        unknown = [k for k in want if k not in catalog]
+        if unknown:
+            raise HTTPException(status_code=422, detail=f"unknown kind(s): {unknown}")
     return want
 
 
@@ -996,7 +845,7 @@ async def create_space(
     legacy = default_scenarios or []
     if raw_scenario or legacy:
         bound = await resolve_bound_scenario(session, scenario, default_scenarios)
-        kinds = allowed_kinds_for_scenario(bound, allowed_kinds)
+        kinds = resolve_space_allowed_kinds(allowed_kinds)
         scenarios_list = [bound]
     else:
         scenarios_list = []
@@ -1151,12 +1000,12 @@ async def update_space(
         bound = await resolve_bound_scenario(session, body.scenario, body.default_scenarios)
         space.default_scenarios = [bound]
         if body.allowed_kinds is not None:
-            space.allowed_kinds = allowed_kinds_for_scenario(bound, body.allowed_kinds)
+            space.allowed_kinds = resolve_space_allowed_kinds(body.allowed_kinds)
         else:
-            space.allowed_kinds = allowed_kinds_for_scenario(bound, None)
+            space.allowed_kinds = resolve_space_allowed_kinds(None)
     elif body.allowed_kinds is not None:
-        bound = await resolve_bound_scenario(session, None, list(space.default_scenarios or []))
-        space.allowed_kinds = allowed_kinds_for_scenario(bound, body.allowed_kinds)
+        await resolve_bound_scenario(session, None, list(space.default_scenarios or []))
+        space.allowed_kinds = resolve_space_allowed_kinds(body.allowed_kinds)
     if body.knowledge_version is not None:
         set_space_knowledge_version(space, body.knowledge_version)
     if body.top_k is not None or body.score is not None:
@@ -1726,9 +1575,6 @@ async def update_document(
         meta_patch["title"] = row.title
     if kind is not None:
         kid = ensure_kind_allowed(kind=kind, space_allowed_kinds=list(space.allowed_kinds or []) if space else [])
-        scenarios = list(space.default_scenarios or []) if space else []
-        if scenarios:
-            kid = allowed_kinds_for_scenario(scenarios[0], [kid])[0]
         row.kind = kid
         meta_patch["kind"] = kid
     if tags is not None:
@@ -1822,26 +1668,6 @@ async def eval_recall(
     )
 
 
-def _evidence_dict_tags_match(
-    item: dict[str, Any],
-    want_tags: list[str],
-    doc_meta: dict[str, KnowledgeDocumentRow],
-) -> bool:
-    from deerflow.knowledge.rag import metadata_tags_match, parse_tags_value
-
-    want = [t.strip() for t in want_tags if t.strip()]
-    if not want:
-        return True
-    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-    if metadata_tags_match(meta, want):
-        return True
-    did = str(meta.get("doc_id") or "")
-    row = doc_meta.get(did)
-    if row is None:
-        return False
-    return bool(parse_tags_value(list(row.tags or [])) & set(want))
-
-
 def _attach_user_attrs(items: list[EvidenceItem]) -> None:
     from deerflow.knowledge.rag import user_attrs_from_metadata
 
@@ -1855,15 +1681,12 @@ def _enrich_evidence_items(
     *,
     pack_id: str,
     space_ids: list[str],
-    lane_id: str | None,
     doc_meta: dict[str, KnowledgeDocumentRow],
 ) -> None:
     for it in items:
         it.metadata = dict(it.metadata or {})
         it.metadata.setdefault("scenario", pack_id)
         it.metadata.setdefault("spaces_searched", space_ids)
-        if lane_id:
-            it.metadata["lane_id"] = lane_id
         row = doc_meta.get(str(it.metadata.get("doc_id") or ""))
         if row is None:
             continue
@@ -1894,20 +1717,15 @@ async def search(
     system_role: str,
     query: str,
     spaces: list[str] | None,
-    kinds: list[str] | None,
-    tags: list[str] | None = None,
     top_k: int | None,
     retrieve_top_k: int | None = None,
     similarity_cutoff: float | None = None,
     knowledge_version: str = "current",
     scenario: str | None = None,
     as_of_date: str | None = None,
-    lane_id: str | None = None,
     fusion_queries: int | None = None,
 ) -> EvidencePackResponse:
     from fastapi import HTTPException
-
-    from deerflow.knowledge.rag import merge_lane_hits, resolve_lanes
 
     if not query.strip():
         raise HTTPException(status_code=422, detail="query required")
@@ -1927,7 +1745,6 @@ async def search(
             answer=None,
         )
 
-    # Scenario: request override → first selected space default → general-qa
     default_scenarios: list[str] = []
     for sid in space_ids:
         sp = accessible_by_id.get(sid)
@@ -1945,6 +1762,7 @@ async def search(
     effective_top_k = top_k if top_k is not None else space_top_k if space_top_k is not None else pack.top_k
     final_top_k = int(effective_top_k or scenario_cfg.top_k or 8)
     pool_k = retrieve_top_k if retrieve_top_k is not None else effective_top_k
+    per_space_pool = max(1, int(pool_k or final_top_k))
     cutoff = similarity_cutoff if similarity_cutoff is not None else (space_score if space_score is not None else pack.score)
     if fusion_queries is None and scenario_cfg.fusion_num_queries is not None:
         fusion_queries = max(1, int(scenario_cfg.fusion_num_queries))
@@ -1952,183 +1770,59 @@ async def search(
     ver_label = (knowledge_version or "current").strip() or "current"
     release_by_space = {sid: space_knowledge_version(accessible_by_id.get(sid)) if ver_label == "current" else ver_label for sid in space_ids}
     resolved_version = ver_label if ver_label != "current" else next(iter(release_by_space.values()), "current")
+    merge_mode = str(scenario_cfg.merge_mode or "slot_then_rrf")
 
-    # Multi-lane when scenario defines lanes and caller did not pin kinds/tags/lane.
-    want_tags = [t for t in (tags or []) if t]
-    use_lanes = lane_id is None and kinds is None and not want_tags
-    lanes = resolve_lanes(scenario_cfg, top_k=final_top_k) if use_lanes else []
-    if lanes:
-        factory = get_session_factory()
-
-        async def _run_lane(active_session: AsyncSession, lane: Any) -> dict[str, Any]:
-            return await search_lane(
-                active_session,
-                user_id=user_id,
-                system_role=system_role,
-                query=query,
-                spaces=spaces,
-                lane=lane,
-                scenario=pack.id,
-                as_of_date=as_of_date,
-                fusion_queries=fusion_queries,
-            )
-
-        if factory is None:
-            # AsyncSession is not safe for concurrent tasks.
-            lane_results = [await _run_lane(session, lane) for lane in lanes]
-        else:
-
-            async def _run_isolated(lane: Any) -> dict[str, Any]:
-                async with factory() as lane_session:
-                    return await _run_lane(lane_session, lane)
-
-            lane_results = await asyncio.gather(*[_run_isolated(lane) for lane in lanes])
-        buckets = [(lr["lane_id"], list(lr.get("items") or []), lane.budget) for lr, lane in zip(lane_results, lanes)]
-        merge_mode = str(scenario_cfg.merge_mode or "slot_then_rrf")
-        merged_raw = merge_lane_hits(buckets, final_top_k=final_top_k, merge_mode=merge_mode)
-        items = [EvidenceItem.model_validate(x) for x in merged_raw]
-        doc_ids = {str(it.metadata.get("doc_id")) for it in items if it.metadata.get("doc_id")}
-        doc_meta: dict[str, KnowledgeDocumentRow] = {}
-        if doc_ids:
-            rows = (await session.execute(select(KnowledgeDocumentRow).where(KnowledgeDocumentRow.id.in_(doc_ids)))).scalars().all()
-            doc_meta = {r.id: r for r in rows}
-        _enrich_evidence_items(
-            items,
-            pack_id=pack.id,
-            space_ids=space_ids,
-            lane_id=None,
-            doc_meta=doc_meta,
+    async def _search_one(space_id: str) -> tuple[str, list[dict]]:
+        release = release_by_space.get(space_id, "current")
+        items = await asyncio.to_thread(
+            search_one_space,
+            space_id=space_id,
+            query=query,
+            top_k=per_space_pool,
+            similarity_cutoff=cutoff,
+            release=release,
+            fusion_queries=fusion_queries,
+            merge_mode=merge_mode,
         )
-        _attach_user_attrs(items)
-        trace_id = next((lr.get("trace_id") for lr in lane_results if lr.get("trace_id")), trace_id)
-        resolved_version = next(
-            (str(lr.get("knowledge_version")) for lr in lane_results if lr.get("knowledge_version")),
-            resolved_version,
-        )
-        return EvidencePackResponse(
-            knowledge_version=resolved_version,
-            trace_id=str(trace_id or ""),
-            items=items,
-            metadata={
-                "lanes": [lr["lane_id"] for lr in lane_results],
-                "merge_mode": merge_mode,
-                "lane_results": [
-                    {
-                        "lane_id": lr["lane_id"],
-                        "hit_count": lr["hit_count"],
-                        "fallback": lr.get("fallback"),
-                        "optional": lr.get("optional"),
-                    }
-                    for lr in lane_results
-                ],
-            },
-        )
+        return space_id, items
 
-    raw = await asyncio.to_thread(
-        search_space,
-        space_ids=space_ids,
-        query=query,
-        top_k=pool_k,
-        kinds=kinds,
-        tags=tags,
-        similarity_cutoff=cutoff,
-        as_of_date=as_of_date,
-        release_by_space=release_by_space,
-        fusion_queries=fusion_queries,
-    )
+    if len(space_ids) == 1:
+        _sid, raw = await _search_one(space_ids[0])
+        space_results = [{"space_id": _sid, "hit_count": len(raw)}]
+    else:
+        pairs = await asyncio.gather(*[_search_one(sid) for sid in space_ids])
+        budgets = space_budgets(len(space_ids), final_top_k)
+        buckets = [(sid, items, budget) for (sid, items), budget in zip(pairs, budgets)]
+        raw = merge_space_hits(buckets, final_top_k=final_top_k, merge_mode=merge_mode)
+        space_results = [{"space_id": sid, "hit_count": len(items)} for sid, items in pairs]
+
+    as_of_dt = parse_as_of(as_of_date)
+    raw = rank_by_temporal(raw, query=query, as_of=as_of_dt)
+    raw = stable_rank_items(raw)[:final_top_k]
+
     doc_ids = {str(x.get("metadata", {}).get("doc_id")) for x in raw if x.get("metadata", {}).get("doc_id")}
     doc_meta: dict[str, KnowledgeDocumentRow] = {}
     if doc_ids:
         rows = (await session.execute(select(KnowledgeDocumentRow).where(KnowledgeDocumentRow.id.in_(doc_ids)))).scalars().all()
         doc_meta = {r.id: r for r in rows}
-    if want_tags:
-        raw = [x for x in raw if _evidence_dict_tags_match(x, want_tags, doc_meta)]
     items = [EvidenceItem.model_validate(x) for x in raw]
-    doc_ids = {str(it.metadata.get("doc_id")) for it in items if it.metadata.get("doc_id")}
-    if doc_ids and not doc_meta:
-        rows = (await session.execute(select(KnowledgeDocumentRow).where(KnowledgeDocumentRow.id.in_(doc_ids)))).scalars().all()
-        doc_meta = {r.id: r for r in rows}
     _enrich_evidence_items(
         items,
         pack_id=pack.id,
         space_ids=space_ids,
-        lane_id=lane_id,
         doc_meta=doc_meta,
     )
     _attach_user_attrs(items)
-    if len(items) > final_top_k:
-        items = items[:final_top_k]
-    return EvidencePackResponse(knowledge_version=resolved_version, trace_id=trace_id, items=items)
-
-
-async def search_lane(
-    session: AsyncSession,
-    *,
-    user_id: str,
-    system_role: str,
-    query: str,
-    spaces: list[str] | None,
-    lane: Any,
-    scenario: str,
-    as_of_date: str | None = None,
-    fusion_queries: int | None = None,
-) -> dict[str, Any]:
-    """Retrieve one scenario lane with widened pool, tag fallback, and relaxed score."""
-    scenario_cfg = get_scenario_config(scenario)
-    pool_k = lane_pool_k(lane.budget, has_tags=bool(lane.tags))
-    base_score = float(scenario_cfg.score or 0.3)
-
-    async def _run(
-        *,
-        tags: list[str] | None,
-        cutoff: float | None = None,
-        fallback: str | None = None,
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        pack = await search(
-            session,
-            user_id=user_id,
-            system_role=system_role,
-            query=query,
-            spaces=spaces,
-            kinds=list(lane.kinds),
-            tags=tags,
-            top_k=lane.budget,
-            retrieve_top_k=pool_k,
-            similarity_cutoff=cutoff,
-            scenario=scenario,
-            as_of_date=as_of_date,
-            lane_id=lane.id,
-            fusion_queries=fusion_queries,
-        )
-        dump = pack.model_dump() if hasattr(pack, "model_dump") else dict(pack)
-        items = list(dump.get("items") or [])
-        if fallback:
-            for it in items:
-                meta = dict(it.get("metadata") or {})
-                meta["lane_fallback"] = fallback
-                it["metadata"] = meta
-        return dump, items
-
-    dump, items = await _run(tags=list(lane.tags) or None)
-    fallback_used: str | None = None
-
-    if not items and lane.tags and not lane.optional:
-        dump, items = await _run(tags=None, fallback="tags_dropped")
-        if items:
-            fallback_used = "tags_dropped"
-
-    if not items and not lane.optional:
-        relaxed = max(0.12, base_score * 0.85)
-        dump, items = await _run(tags=None, cutoff=relaxed, fallback="score_relaxed")
-        if items:
-            fallback_used = fallback_used or "score_relaxed"
-
-    return {
-        "lane_id": lane.id,
-        "hit_count": len(items),
-        "items": items,
-        "trace_id": dump.get("trace_id"),
-        "knowledge_version": dump.get("knowledge_version"),
-        "fallback": fallback_used,
-        "optional": bool(lane.optional),
-    }
+    extra: dict[str, Any] = {}
+    if len(space_ids) > 1:
+        extra["metadata"] = {
+            "spaces": list(space_ids),
+            "merge_mode": merge_mode,
+            "space_results": space_results,
+        }
+    return EvidencePackResponse(
+        knowledge_version=resolved_version,
+        trace_id=trace_id,
+        items=items,
+        **extra,
+    )

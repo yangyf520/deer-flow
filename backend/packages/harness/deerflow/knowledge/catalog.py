@@ -669,8 +669,6 @@ async def validate_scenario_code(session: AsyncSession, code: str) -> str:
 
 def build_catalog(cache: _CatalogCache, *, locale: str = LOCALE_ZH) -> dict[str, Any]:
     """Build API catalog dict from in-memory cache."""
-    from deerflow.knowledge.rag import scenario_kind_ids
-
     loc = norm_locale(locale)
 
     scenarios_out: list[dict[str, Any]] = []
@@ -691,17 +689,6 @@ def build_catalog(cache: _CatalogCache, *, locale: str = LOCALE_ZH) -> dict[str,
                 ),
                 "space_id": cache.scenario_space_ids.get(code, code),
                 "host_space_id": cache.scenario_host_space_ids.get(code, ""),
-                "kinds": scenario_kind_ids(cfg),
-                "lanes": [
-                    {
-                        "id": lane.id,
-                        "kinds": list(lane.kinds or []),
-                        "tags": list(lane.tags or []),
-                        "budget": lane.budget,
-                        "optional": bool(lane.optional),
-                    }
-                    for lane in (cfg.lanes or [])
-                ],
             }
         )
         for kind in cache.kinds_by_scenario.get(code, []):

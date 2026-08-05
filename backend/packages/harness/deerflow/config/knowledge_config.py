@@ -187,6 +187,9 @@ class KnowledgeRetrievalConfig(BaseModel):
     similarity_cutoff: float | None = None  # legacy alias → score
     # Evidence snippet length (strip media + window around query terms)
     snippet_max_chars: int = 1200
+    # Per-document parallel merge inside a space (avoids one file dominating top_k).
+    per_doc_merge: bool = True
+    max_doc_paths: int = 32
     query_llm: KnowledgeQueryLlmConfig = Field(default_factory=KnowledgeQueryLlmConfig)
 
     @model_validator(mode="after")
@@ -398,23 +401,8 @@ class KnowledgeConfig(BaseModel):
                 return item
         return None
 
-    def kind_by_id(self, kind_id: str | None) -> KnowledgeKindConfig | None:
-        want = (kind_id or "").strip()
-        if not want:
-            return None
-        for item in self.kinds:
-            if item.id == want:
-                return item
-        return None
-
     def configured_kind_ids(self) -> set[str]:
         return {item.id for item in self.kinds if item.id}
-
-    def configured_tag_ids(self) -> set[str]:
-        return {item.id for item in self.tags if item.id}
-
-    def configured_tag_group_ids(self) -> set[str]:
-        return {item.id for item in self.tag_groups if item.id}
 
 
 _knowledge_config: KnowledgeConfig = KnowledgeConfig()

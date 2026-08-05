@@ -200,20 +200,10 @@ export function resolveSpaceCodeLabel(
 export function importKindForSpace(
   space: {
     allowed_kinds?: string[] | null;
-    scenario?: string | null;
-    default_scenarios?: string[] | null;
   } | null,
-  scenarios?: { type: string; kinds?: string[] | null }[],
 ): string {
   const allowed = (space?.allowed_kinds ?? []).filter(Boolean);
   if (allowed.length > 0) return allowed[0]!;
-  const scenarioType = boundScenarioType(space);
-  const pack =
-    scenarioType && scenarios
-      ? scenarios.find((s) => s.type === scenarioType)
-      : undefined;
-  const fromScenario = (pack?.kinds ?? []).filter(Boolean);
-  if (fromScenario.length > 0) return fromScenario[0]!;
   return "general";
 }
 
@@ -230,19 +220,6 @@ export function tagGroupLabel(
   return t.tagGroups[groupId] ?? groupId;
 }
 
-export function tagsFromTagGroups(
-  groupIds: Iterable<string>,
-  catalog: TagGroupCatalogEntry[],
-): string[] {
-  const want = new Set(groupIds);
-  const out: string[] = [];
-  for (const group of catalog) {
-    if (!want.has(group.id)) continue;
-    out.push(...group.tags);
-  }
-  return [...new Set(out)];
-}
-
 export function tagGroupsFromTags(
   tags: string[] | undefined,
   catalog: TagGroupCatalogEntry[],
@@ -251,32 +228,6 @@ export function tagGroupsFromTags(
   return catalog
     .filter((g) => g.tags.some((t) => have.has(t)))
     .map((g) => g.id);
-}
-
-/** Tag groups applicable to a scenario's policy lanes (intersect lane tags with catalog). */
-export function tagGroupsForScenario(
-  scenario:
-    | { type?: string; lanes?: { kinds?: string[]; tags?: string[] }[] | null }
-    | null
-    | undefined,
-  catalog: TagGroupCatalogEntry[],
-  kind = "policy",
-): TagGroupCatalogEntry[] {
-  const scenarioType = scenario?.type;
-  let groups = catalog;
-  if (scenarioType) {
-    groups = catalog.filter((g) => !g.scenario || g.scenario === scenarioType);
-  }
-  const lanes = scenario?.lanes ?? [];
-  if (lanes.length === 0) return groups;
-  const laneTags = new Set<string>();
-  for (const lane of lanes) {
-    if ((lane.kinds ?? []).includes(kind)) {
-      for (const t of lane.tags ?? []) laneTags.add(t);
-    }
-  }
-  if (laneTags.size === 0) return [];
-  return groups.filter((g) => g.tags.some((t) => laneTags.has(t)));
 }
 
 export function accessLabel(value: string, t: KnowledgeT): string {

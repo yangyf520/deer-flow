@@ -299,8 +299,8 @@ prepare(doc_path)
 
 retrieve(sections_json, spaces?)
   → 每段 section_query
-  → scenario=policy-review 多 lane 并行 search_lane
-  → merge_lane_hits → packs + allowed_ids
+  → 多 space 并行 search（每绑定的 knowledge space 一路）
+  → merge_space_hits → packs + allowed_ids
   → source sections + packs 写入 ToolMessage.artifact
 
 Agent 起草 draft

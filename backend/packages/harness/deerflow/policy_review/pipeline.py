@@ -173,7 +173,7 @@ def empty_section_pack(*, section_id: str, query: str = "") -> dict[str, Any]:
             "answer": None,
             "metadata": {"skipped": "empty_query"},
         },
-        "lane_results": [],
+        "space_results": [],
     }
 
 
@@ -327,7 +327,7 @@ def rebuild_retrieve_result(session: dict[str, Any]) -> dict[str, Any]:
                 "hit_count": len(items),
                 "trace_id": pack.get("trace_id") if isinstance(pack, dict) else "",
                 "knowledge_version": pack.get("knowledge_version") if isinstance(pack, dict) else "",
-                "lane_results": [],
+                "space_results": [],
             }
         )
 
@@ -455,7 +455,7 @@ async def retrieve_for_sections(
     max_concurrency: int = DEFAULT_RETRIEVE_CONCURRENCY,
     as_of_date: str | None = None,
 ) -> dict[str, Any]:
-    """Parallel per-section retrieval; lanes merge inside knowledge.search when configured."""
+    """Parallel per-section retrieval; space + document paths merge inside knowledge.search."""
     from deerflow.knowledge.service import search
 
     if session is None and session_factory is None:
@@ -495,7 +495,6 @@ async def retrieve_for_sections(
                     system_role=system_role,
                     query=query,
                     spaces=spaces,
-                    kinds=None,
                     top_k=top_k,
                     scenario=scenario_id,
                     as_of_date=as_of_date,
@@ -514,7 +513,7 @@ async def retrieve_for_sections(
             "query": query[:200],
             "hit_count": len(items),
             "pack": dump,
-            "lane_results": list(meta.get("lane_results") or []),
+            "space_results": list(meta.get("space_results") or []),
         }
 
     section_results = await asyncio.gather(*[one_section(i, s) for i, s in enumerate(sections) if isinstance(s, dict)])
@@ -530,7 +529,7 @@ async def retrieve_for_sections(
             "hit_count": r["hit_count"],
             "trace_id": (r["pack"] or {}).get("trace_id"),
             "knowledge_version": (r["pack"] or {}).get("knowledge_version"),
-            "lane_results": r.get("lane_results") or [],
+            "space_results": r.get("space_results") or [],
         }
         for r in section_results
     ]

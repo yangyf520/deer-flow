@@ -54,7 +54,6 @@ async def search_tool(
             system_role=system_role,
             query=query,
             spaces=spaces,
-            kinds=None,
             top_k=top_k,
             scenario=scenario,
         )

@@ -391,7 +391,7 @@ export default function KnowledgeSpaceDocumentsPage() {
     prepared,
   }: UploadInput) {
     if (!file) return;
-    const kind = importKindForSpace(space, scenarios);
+    const kind = importKindForSpace(space);
     const controller = new AbortController();
     uploadAbortRef.current = controller;
     const { signal } = controller;

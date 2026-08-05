@@ -866,11 +866,10 @@ class TestPolicyReview:
         assert "mystery" not in result["dimensions"][0]["findings"][0]
 
     @pytest.mark.asyncio
-    async def test_retrieve_parallel_lanes_merge(self):
+    async def test_retrieve_parallel_spaces_merge(self):
         from deerflow.config.knowledge_config import (
             KnowledgeConfig,
             KnowledgeScenarioConfig,
-            ScenarioLaneConfig,
             get_knowledge_config,
             set_knowledge_config,
         )
@@ -884,18 +883,13 @@ class TestPolicyReview:
                         top_k=10,
                         score=0.3,
                         fusion_num_queries=1,
-                        lanes=[
-                            ScenarioLaneConfig(kinds=["policy"], tags=["statute", "national-law"], budget=4),
-                            ScenarioLaneConfig(kinds=["policy"], tags=["company-policy"], budget=3),
-                            ScenarioLaneConfig(kinds=["reference"], budget=2),
-                            ScenarioLaneConfig(kinds=["case"], budget=3),
-                        ],
+                        merge_mode="slot_then_rrf",
                     )
                 ]
             )
         )
-        lane_hits = {
-            "policy:statute-national-law": [
+        space_hits = {
+            "legal": [
                 {
                     "id": "law-1",
                     "source": "legal",
@@ -903,9 +897,10 @@ class TestPolicyReview:
                     "title": "law",
                     "snippet": "s",
                     "score": 0.9,
+                    "metadata": {"space_id": "legal"},
                 }
             ],
-            "policy:company-policy": [
+            "company": [
                 {
                     "id": "co-1",
                     "source": "legal",
@@ -913,6 +908,7 @@ class TestPolicyReview:
                     "title": "co",
                     "snippet": "s",
                     "score": 0.85,
+                    "metadata": {"space_id": "company"},
                 }
             ],
             "reference": [
@@ -923,6 +919,7 @@ class TestPolicyReview:
                     "title": "ref",
                     "snippet": "s",
                     "score": 0.8,
+                    "metadata": {"space_id": "reference"},
                 }
             ],
             "case": [
@@ -933,35 +930,28 @@ class TestPolicyReview:
                     "title": "case",
                     "snippet": "s",
                     "score": 0.95,
+                    "metadata": {"space_id": "case"},
                 }
             ],
         }
 
-        async def _fake_search_lane(_session, *, lane, **kwargs):
-            return {
-                "lane_id": lane.id,
-                "hit_count": len(lane_hits.get(lane.id, [])),
-                "items": lane_hits.get(lane.id, []),
-                "trace_id": "trace-1",
-                "knowledge_version": "kv",
-                "fallback": None,
-                "optional": False,
-            }
+        def _fake_search_one(*, space_id, **kwargs):
+            return list(space_hits.get(space_id, []))
 
         try:
             with (
                 patch(
                     "deerflow.knowledge.service.list_accessible_spaces",
-                    new=AsyncMock(return_value=[SimpleNamespace(id="legal", default_scenarios=["policy-review"])]),
+                    new=AsyncMock(return_value=[SimpleNamespace(id=sid, default_scenarios=["policy-review"]) for sid in ("legal", "company", "reference", "case")]),
                 ),
-                patch("deerflow.knowledge.service.search_lane", new=AsyncMock(side_effect=_fake_search_lane)),
+                patch("deerflow.knowledge.service.search_one_space", side_effect=_fake_search_one),
             ):
                 out = await retrieve_for_sections(
                     session=object(),
                     user_id="u1",
                     system_role="user",
                     sections=[{"id": "s1", "title": "s1", "body": "甲方应按约定及时付款并开具发票。"}],
-                    spaces=["legal"],
+                    spaces=["legal", "company", "reference", "case"],
                     scenario="policy-review",
                     top_k=4,
                 )
@@ -969,18 +959,19 @@ class TestPolicyReview:
             set_knowledge_config(prev)
 
         assert set(out["allowed_ids"]) == {"law-1", "co-1", "ref-1", "case-1"}
-        assert [item["id"] for item in out["packs"][0]["items"]] == [
+        assert set(item["id"] for item in out["packs"][0]["items"]) == {
             "law-1",
             "co-1",
             "ref-1",
             "case-1",
-        ]
-        assert len(out["section_results"][0]["lane_results"]) == 4
+        }
+        assert len(out["section_results"][0]["space_results"]) == 4
         assert out["quote_pool"][0]["quotes"]
         assert out["draft_scaffold"]["schema_hint"] == "legal-review.v1"
         assert out["draft_scaffold"]["dimensions"][0]["id"] == "s1"
-        assert out["evidence_digest"][0]["evidence"][0]["id"] == "law-1"
-        assert "snippet" in out["evidence_digest"][0]["evidence"][0]
+        digest_ids = {ev["id"] for ev in out["evidence_digest"][0]["evidence"]}
+        assert digest_ids == {"law-1", "co-1", "ref-1", "case-1"}
+        assert all("snippet" in ev for ev in out["evidence_digest"][0]["evidence"])
 
     def test_merge_sections_caps_retrieve_fanout(self):
         sections = [{"id": f"section-{index}", "title": f"§{index}", "body": f"正文{index}。"} for index in range(1, 25)]
@@ -1146,7 +1137,7 @@ class TestPolicyReview:
                         "section_id": "section-1",
                         "query": "第一条",
                         "hit_count": 0,
-                        "lane_results": [],
+                        "space_results": [],
                     }
                 ],
                 "quote_pool": [{"section_id": "section-1", "quotes": ["甲方应按约定付款并及时开具发票。"]}],

@@ -32,14 +32,6 @@ export type Space = {
   updated_at?: string | null;
 };
 
-export type ScenarioLane = {
-  id?: string;
-  kinds?: string[];
-  tags?: string[];
-  budget?: number | null;
-  optional?: boolean;
-};
-
 export type ScenarioPack = {
   description?: string;
   type: string;
@@ -48,9 +40,6 @@ export type ScenarioPack = {
   space_id?: string;
   /** Knowledge space that owns this catalog entry. */
   host_space_id?: string;
-  /** Kind ids from scenario lanes; empty = single-path retrieve. */
-  kinds?: string[];
-  lanes?: ScenarioLane[];
 };
 
 export type ScenariosListResponse = {
@@ -94,8 +83,6 @@ export type ScenarioDefinitionInput = {
   description?: string;
   merge_mode?: string;
   fusion_num_queries?: number | null;
-  kinds?: string[];
-  lanes?: ScenarioLane[];
   host_space_id?: string;
 };
 
@@ -211,11 +198,6 @@ async function readJson<T>(res: Response, fallback: string): Promise<T> {
 export async function listScenarios(): Promise<ScenariosListResponse> {
   const res = await fetch(`${base()}/scenarios`, withLocale());
   return readJson(res, "Failed to list scenarios");
-}
-
-export async function listKinds(): Promise<KindsListResponse> {
-  const res = await fetch(`${base()}/kinds`, withLocale());
-  return readJson(res, "Failed to list kinds");
 }
 
 export async function listCatalog(): Promise<KnowledgeCatalogResponse> {

@@ -162,12 +162,13 @@ erDiagram
   → 元数据过滤（空间、类型、标签、版本等）
   → 重排与父块扩展
   → 分数阈值截断
-  → 按场景 lanes 分路合并（rag.resolve_lanes → merge_lane_hits）
+  → 多空间并行检索 + 分路合并（每绑定的 knowledge space 一路，rag.merge_space_hits）
+  → 单空间内多文件并行检索 + 分路合并（每 doc 一路，避免单文件占满 top_k）
   → 时效与条款加权（rag.rank_by_temporal）
   → 输出 Evidence（正文片段、来源、trace_id、knowledge_version）
 ```
 
-新增业务检索场景时，仅需在 `config.yaml` 中增加或调整 `scenarios` 与 `lanes` 配置，无需修改检索核心代码。
+新增业务检索场景时，仅需在 `config.yaml` 或 pub_codes 中增加或调整 `scenarios` 配置（top_k、score、merge_mode），无需修改检索核心代码。召回分路按 **Agent 绑定的 knowledge space** 划分，不再按 kind/tag lane 划分。
 
 ---
 
@@ -234,8 +235,8 @@ Agent 绑库（二选一或并存）
 
 ```text
 deerflow/knowledge/
-  service.py          # Pydantic 模型、ACL、空间/文档 CRUD、search/search_lane、Agent 工具
-  rag.py              # 解析/入库/检索；场景 lanes、时效规则、Evidence 打包
+  service.py          # Pydantic 模型、ACL、空间/文档 CRUD、search、Agent 工具
+  rag.py              # 解析/入库/检索；多空间合并、时效规则、Evidence 打包
   __init__.py
 
 deerflow/persistence/knowledge/
@@ -265,15 +266,15 @@ frontend/src/components/workspace/
 
 | 符号 | 职责 |
 |------|------|
-| `get_scenario_config` | 从 YAML 解析 `scenarios[]` |
-| `resolve_lanes` | 将 scenario 展开为可执行 lane 列表 |
-| `scenario_kind_ids` | 汇总 scenario 涉及的 kind |
-| `lane_pool_k` | 单 lane 检索池大小（含 tag 放宽） |
-| `merge_lane_hits` | 多 lane 结果合并（slot + RRF） |
+| `get_scenario_config` | 从 YAML / pub_codes 解析 `scenarios[]` |
+| `search_one_space` | 单空间检索；多文件时 per-doc 并行 + merge |
+| `list_space_doc_ids` | 枚举空间内已索引文档 id |
+| `space_budgets` | 多空间 top_k 槽位分配 |
+| `merge_space_hits` | 多空间结果合并（slot + RRF） |
 | `evidence_dict` | 组装 Evidence 响应体 |
 | `parse_as_of` / `rank_by_temporal` | 法规时效与条款锚点加权 |
 
-**`service.py`：** HTTP 与 Agent 共用 `search()`、`search_lane()`；`knowledge_search_tool` 注册于 `config.yaml` 的 `tools[].use: deerflow.knowledge.service:knowledge_search_tool`。
+**`service.py`：** HTTP 与 Agent 共用 `search()`；多 space 时 `asyncio.gather` 并行调 `search_one_space` 再合并。`knowledge_search_tool` 注册于 `config.yaml` 的 `tools[].use: deerflow.knowledge.service:knowledge_search_tool`。
 
 配置 Schema 位于 `config/knowledge_config.py`。
 
@@ -293,7 +294,7 @@ frontend/src/components/workspace/
 | `vector_store.persist_dir` | Chroma 本地持久化目录 |
 | `retrieval` | 混合检索、重排、top_k、分数阈值等 |
 | `kinds[]` | 文档类型枚举 |
-| `scenarios[]` | 检索场景及 lanes 定义 |
+| `scenarios[]` | 检索场景（top_k、score、merge_mode） |
 | `authz` | `system_admin_is_space_admin`、`allow_user_create_space`（不含组织目录） |
 
 扩展新类型或场景时，修改 YAML 并补充前端 i18n；更换嵌入或向量库实现后，需对已有文档执行 reindex；领域专有字段优先写入 `attrs`。
@@ -309,7 +310,7 @@ frontend/src/components/workspace/
 
 ## 9. 与业界差距
 
-对标 Glean / Dify·RAGFlow / Bedrock Knowledge Bases 等产品形态。当前 P0 已具备：空间与文档管理、混合检索、场景 lanes、空间级 ACL（含部门 grant）、召回评测 API、Agent 绑库（API + UI）。
+对标 Glean / Dify·RAGFlow / Bedrock Knowledge Bases 等产品形态。当前 P0 已具备：空间与文档管理、混合检索、多 space/多文件分路召回、空间级 ACL（含部门 grant）、召回评测 API、Agent 绑库（API + UI）。
 
 ### 9.1 产品体验（近期优先）— 已完成
 
