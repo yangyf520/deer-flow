@@ -120,9 +120,23 @@ def test_attach_row_no():
         ],
     }
     pipeline._attach_row_no(data, source_text=source)
-    assert isinstance(data["details"][0]["row_no"], int)
-    assert isinstance(data["details"][1]["row_no"], int)
-    assert data["details"][0]["row_no"] >= 1
+    assert data["details"][0]["row_no"] == 3
+    assert data["details"][1]["row_no"] == 5
+    assert data["details"][0]["row_no"] < data["details"][1]["row_no"]
+
+
+def test_attach_row_no_skips_earlier_duplicate_body():
+    source = "header\n\n**第1条**　甲\n\n**第2条**　乙\n\n**第3条**　甲"
+    data = {
+        "title": "L",
+        "details": [
+            {"segment_label": "第1条", "body": "甲"},
+            {"segment_label": "第3条", "body": "甲"},
+        ],
+    }
+    pipeline._attach_row_no(data, source_text=source)
+    assert data["details"][0]["row_no"] == 3
+    assert data["details"][1]["row_no"] == 7
 
 
 def test_parse_document_runs_batches_in_parallel(monkeypatch):

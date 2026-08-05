@@ -19,10 +19,9 @@ from deerflow.utils.oneshot_llm import run_oneshot_llm
 
 logger = logging.getLogger(__name__)
 
-# Keep each LLM call small enough for output JSON (Map-Reduce batches).
-MAX_BATCH_CHARS = 4000
-MAX_BLOCKS_PER_BATCH = 10
-MAX_CONCURRENT_BATCHES = 4
+MAX_BATCH_CHARS = 8000
+MAX_BLOCKS_PER_BATCH = 15
+MAX_CONCURRENT_BATCHES = 6
 _BOLD_LABEL_MAX_LEN = 80
 _GROUNDING_MIN_BODY_LEN = 12
 
@@ -230,8 +229,8 @@ def _row_no_at(source_text: str, index: int) -> int:
     return source_text[:index].count("\n") + 1
 
 
-def _find_row_no(body: str, source_text: str) -> int | None:
-    """1-based line number in ``source_text`` where ``body`` best matches."""
+def _find_row_no(body: str, source_text: str, *, after_line: int = 0) -> int | None:
+    """1-based line number in ``source_text`` where ``body`` best matches after ``after_line``."""
     if not str(body).strip() or not source_text.strip():
         return None
 
@@ -239,26 +238,37 @@ def _find_row_no(body: str, source_text: str) -> int | None:
     lines = source_text.splitlines()
 
     for index, line in enumerate(lines, start=1):
+        if index <= after_line:
+            continue
         norm_line = _normalize_grounding_text(line)
         for cand in candidates:
             if cand in line or cand in norm_line:
                 return index
 
     for cand in candidates:
-        idx = source_text.find(cand)
-        if idx >= 0:
-            return _row_no_at(source_text, idx)
+        start = 0
+        while True:
+            idx = source_text.find(cand, start)
+            if idx < 0:
+                break
+            line = _row_no_at(source_text, idx)
+            if line > after_line:
+                return line
+            start = idx + 1
 
     norm_source = _normalize_grounding_text(source_text)
     for cand in candidates:
-        pos = norm_source.find(cand)
-        if pos < 0:
-            continue
-        consumed = 0
-        for index, line in enumerate(lines, start=1):
-            consumed += len(_normalize_grounding_text(line))
-            if consumed >= pos:
-                return index
+        pos = 0
+        while True:
+            pos = norm_source.find(cand, pos)
+            if pos < 0:
+                break
+            consumed = 0
+            for index, line in enumerate(lines, start=1):
+                consumed += len(_normalize_grounding_text(line))
+                if consumed >= pos and index > after_line:
+                    return index
+            pos += 1
     return None
 
 
@@ -269,16 +279,18 @@ def _attach_row_no(data: Any, *, source_text: str) -> None:
     details = data.get("details")
     if not isinstance(details, list):
         return
+    last_line = 0
     for item in details:
         if not isinstance(item, dict):
             continue
-        line_no = _find_row_no(str(item.get("body") or ""), source_text)
+        line_no = _find_row_no(str(item.get("body") or ""), source_text, after_line=last_line)
         if line_no is None:
             label = item.get("segment_label") or item.get("label")
             if label is not None:
-                line_no = _find_row_no(str(label), source_text)
+                line_no = _find_row_no(str(label), source_text, after_line=last_line)
         if line_no is not None:
             item["row_no"] = line_no
+            last_line = line_no
 
 
 def _collect_warnings(data: Any, *, source_text: str = "") -> list[str]:

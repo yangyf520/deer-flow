@@ -311,6 +311,10 @@ class KnowledgeParseConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     timeout_seconds: int = 120
+    model_name: str | None = Field(
+        default=None,
+        description="config.models slot for document parse (None = default chat model)",
+    )
 
 
 def _normalize_catalog_ids(value: Any, *, field: str) -> list[dict[str, Any] | str]:

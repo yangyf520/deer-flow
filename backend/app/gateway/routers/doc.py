@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from app.gateway.authz import require_permission
 from app.gateway.deps import get_config
 from deerflow.config.app_config import AppConfig
+from deerflow.config.knowledge_config import get_knowledge_config
 from deerflow.doc_parse.contract import DocParseResponse
 from deerflow.doc_parse.pipeline import DocParseError, parse_document
 
@@ -49,6 +50,9 @@ async def parse_doc(
             raise HTTPException(status_code=422, detail="output_schema must be a JSON object")
         schema = parsed_schema
 
+    parse_cfg = get_knowledge_config().parse
+    parse_model_name = (parse_cfg.model_name or "").strip() or None
+
     try:
         return await parse_document(
             data=data,
@@ -56,6 +60,7 @@ async def parse_doc(
             segment_prompt=segment_prompt,
             output_schema=schema,
             app_config=config,
+            model_name=parse_model_name,
         )
     except DocParseError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
