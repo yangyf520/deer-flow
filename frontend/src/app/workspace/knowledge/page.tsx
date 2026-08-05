@@ -56,7 +56,7 @@ export default function KnowledgeSpacesPage() {
   const { t } = useI18n();
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [name, setName] = useState("");
+  const [spaceId, setSpaceId] = useState("");
   const [description, setDescription] = useState("");
   const [access, setAccess] = useState("open");
   const [ingestMode, setIngestMode] = useState<UploadMode>("unstructured");
@@ -65,7 +65,7 @@ export default function KnowledgeSpacesPage() {
   const [busy, setBusy] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [editingSpace, setEditingSpace] = useState<Space | null>(null);
-  const [editName, setEditName] = useState("");
+  const [editSpaceId, setEditSpaceId] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editAccess, setEditAccess] = useState("open");
   const [editIngestMode, setEditIngestMode] =
@@ -81,6 +81,7 @@ export default function KnowledgeSpacesPage() {
     ? spaces
     : spaces.filter(
         (s) =>
+          s.id.toLowerCase().includes(q) ||
           s.name.toLowerCase().includes(q) ||
           (s.description?.toLowerCase().includes(q) ?? false),
       );
@@ -109,19 +110,21 @@ export default function KnowledgeSpacesPage() {
   }, [reload]);
 
   async function onCreate() {
-    if (!name.trim()) return;
+    const trimmedId = spaceId.trim();
+    if (!trimmedId) return;
     setBusy(true);
     try {
       const retrieval = parseRetrievalPayload(topK, score);
       const created = await createSpace({
-        name: name.trim(),
+        id: trimmedId,
+        name: trimmedId,
         description: description.trim() || undefined,
         access,
         top_k: retrieval.top_k,
         score: retrieval.score,
       });
       storeIngestMode(created.id, ingestMode);
-      setName("");
+      setSpaceId("");
       setDescription("");
       setIngestMode("unstructured");
       setTopK(String(DEFAULT_TOP_K));
@@ -137,7 +140,7 @@ export default function KnowledgeSpacesPage() {
 
   function openEditSpace(space: Space) {
     setEditingSpace(space);
-    setEditName(space.name);
+    setEditSpaceId(space.id);
     setEditDescription(space.description ?? "");
     setEditAccess(space.access);
     setEditIngestMode(readStoredIngestMode(space.id));
@@ -151,8 +154,8 @@ export default function KnowledgeSpacesPage() {
 
   async function onSaveEditSpace() {
     if (!editingSpace) return;
-    const trimmedName = editName.trim();
-    if (!trimmedName) {
+    const trimmedId = editSpaceId.trim();
+    if (!trimmedId) {
       setError(t.knowledge.fieldName);
       return;
     }
@@ -160,14 +163,20 @@ export default function KnowledgeSpacesPage() {
     setError(null);
     try {
       const retrieval = parseRetrievalPayload(editTopK, editScore);
+      const idChanged = trimmedId !== editingSpace.id;
       await updateSpace(editingSpace.id, {
-        name: trimmedName,
+        id: idChanged ? trimmedId : undefined,
+        name: trimmedId,
         description: editDescription.trim(),
         access: editAccess,
         top_k: retrieval.top_k,
         score: retrieval.score,
       });
-      storeIngestMode(editingSpace.id, editIngestMode);
+      if (idChanged) {
+        storeIngestMode(trimmedId, readStoredIngestMode(editingSpace.id));
+      } else {
+        storeIngestMode(editingSpace.id, editIngestMode);
+      }
       setEditingSpace(null);
       toast.success(t.knowledge.spaceUpdated);
       await reload();
@@ -253,8 +262,8 @@ export default function KnowledgeSpacesPage() {
       <SpaceCreateDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
-        name={name}
-        setName={setName}
+        spaceId={spaceId}
+        setSpaceId={setSpaceId}
         description={description}
         setDescription={setDescription}
         access={access}
@@ -275,8 +284,8 @@ export default function KnowledgeSpacesPage() {
           if (!open) setEditingSpace(null);
         }}
         space={editingSpace}
-        name={editName}
-        setName={setEditName}
+        spaceId={editSpaceId}
+        setSpaceId={setEditSpaceId}
         description={editDescription}
         setDescription={setEditDescription}
         access={editAccess}

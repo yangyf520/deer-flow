@@ -524,10 +524,26 @@ export const enUS: Translations = {
     soulHint: "Personality, principles, and guardrails (Markdown)",
     soulGenerate: "AI generate",
     soulGenerateHint:
-      "Drafts SOUL from the name, description, and current text — review before saving.",
+      "Generate SOUL step by step through conversation, then apply it to the form.",
     soulGenerating: "Generating…",
     soulGenerateError: "Failed to generate SOUL",
     soulGenerated: "SOUL generated — review and save when ready",
+    soulDraftPageTitle: "AI persona builder",
+    soulDraftBootstrapMessage:
+      "The agent name is {name}. {descriptionPart}Help me design its SOUL.md persona through conversation. Do not call setup_agent to save the agent — focus on designing SOUL only.",
+    soulDraftDescriptionPart: "Description: {description}. ",
+    soulDraftFinishMessage:
+      "Based on everything we discussed, output the final SOUL.md body. Output Markdown only, wrapped in a ```markdown code block. Do not call any tools.",
+    soulDraftConfirm: "Confirm SOUL",
+    soulDraftConfirmTitle: "Confirm persona",
+    soulDraftConfirmHint:
+      "This will fill the form. You can still edit before saving.",
+    soulDraftReturn: "Confirm and return",
+    soulDraftBackToChat: "Continue chat",
+    soulDraftChatPlaceholder:
+      "Answer the agent's questions to refine the persona…",
+    soulDraftExtractError:
+      "Could not extract SOUL from the reply — continue the chat and try again.",
     sectionCapability: "Capabilities",
     knowledgeTitle: "Knowledge",
     knowledgeBoundCount: "Mounted {bound} / {total}",

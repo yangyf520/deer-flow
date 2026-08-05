@@ -222,7 +222,7 @@ export function ItemCard({
   description?: ReactNode;
   badges?: ReactNode;
   metaTags?: ReactNode[];
-  metaTagsLayout?: "inline" | "stacked";
+  metaTagsLayout?: "inline" | "inline-nowrap" | "stacked";
   actions?: ReactNode;
   className?: string;
 }) {
@@ -264,15 +264,19 @@ export function ItemCard({
               "flex gap-1.5",
               metaTagsLayout === "stacked"
                 ? "flex-col"
-                : "min-h-[1.625rem] flex-wrap",
+                : metaTagsLayout === "inline-nowrap"
+                  ? "min-h-[1.625rem] flex-nowrap"
+                  : "min-h-[1.625rem] flex-wrap",
             )}
           >
             {metaTags!.map((item, i) => (
               <li
                 key={i}
                 className={cn(
-                  "max-w-full",
-                  metaTagsLayout === "stacked" && "w-full min-w-0",
+                  "max-w-full min-w-0",
+                  metaTagsLayout === "stacked" && "w-full",
+                  metaTagsLayout === "inline-nowrap" &&
+                    "w-[calc((100%-0.375rem)/2)] flex-none shrink-0",
                 )}
               >
                 {item}

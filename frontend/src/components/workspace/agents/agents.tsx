@@ -7,12 +7,12 @@ import {
   BotIcon,
   BotOffIcon,
   CheckIcon,
-  Loader2Icon,
   MessageSquareIcon,
   SettingsIcon,
   SparklesIcon,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -22,7 +22,6 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import { ScenarioSelect } from "@/app/workspace/knowledge/ui";
 import {
   CardAction,
   ConfirmDialog,
@@ -30,7 +29,6 @@ import {
   DialogFormSection,
   DialogInputField,
   DialogSelectField,
-  DialogSlotField,
   DialogTextareaField,
   FormDialog,
   InlineEmpty,
@@ -39,12 +37,8 @@ import {
   buildFormDialogEditResourceMeta,
   dialogSaveFooterProps,
   dialogInlineButtonClass,
-  itemMetaTags,
 } from "@/components/component";
-import {
-  dialogSecondaryButtonClass,
-  selectTriggerWrapClass,
-} from "@/components/component/styles";
+import { dialogSecondaryButtonClass } from "@/components/component/styles";
 import { Button } from "@/components/ui/button";
 import type {
   Agent,
@@ -55,7 +49,6 @@ import {
   AgentNameCheckError,
   AgentsApiDisabledError,
   checkAgentName,
-  generateSoul,
   useCreateAgent,
   useDeleteAgent,
   useUpdateAgent,
@@ -64,11 +57,11 @@ import { useAuth } from "@/core/auth/AuthProvider";
 import { useI18n } from "@/core/i18n/hooks";
 import {
   accessLabel,
-  boundScenarioType,
   listMySpaces,
-  listScenarios,
+  resolveSpaceDisplayLabel,
   roleLabel,
-  scenarioLabel,
+  spacePrimaryCode,
+  spaceSecondaryDescription,
   type Space,
 } from "@/core/knowledge";
 import { loadModels } from "@/core/models/api";
@@ -76,6 +69,18 @@ import { cn } from "@/lib/utils";
 
 const NAME_RE = /^[A-Za-z0-9-]+$/;
 const INHERIT_VALUE = "__inherit__";
+
+export const AGENT_SOUL_DRAFT_FORM_KEY = "deerflow:pending-agent-form";
+export const AGENT_SOUL_DRAFT_SOUL_KEY = "deerflow:pending-agent-soul";
+
+type PendingAgentForm = {
+  mode: "create" | "edit";
+  name: string;
+  description: string;
+  model: string | null;
+  spaces: string[];
+  soul: string;
+};
 
 function newChatHref(agentName: string) {
   return `/workspace/agents/${encodeURIComponent(agentName)}/chats/new`;
@@ -115,7 +120,8 @@ function SpaceMountRow({
   const { t } = useI18n();
   const access = accessLabel(space.access, t.knowledge);
   const role = space.my_role ? roleLabel(space.my_role, t.knowledge) : null;
-  const bound = boundScenarioType(space);
+  const primary = spacePrimaryCode(space);
+  const secondary = spaceSecondaryDescription(space, primary);
 
   return (
     <button
@@ -140,16 +146,16 @@ function SpaceMountRow({
         {selected ? <CheckIcon className="size-3.5" /> : null}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="truncate text-sm font-medium">{space.name}</span>
-          {bound ? (
-            <span className="text-muted-foreground text-xs">
-              {scenarioLabel(bound, t.knowledge)}
-            </span>
-          ) : null}
-          {space.description ? (
-            <span className="text-muted-foreground line-clamp-1 text-sm">
-              {space.description}
+        <span
+          className="flex min-w-0 items-baseline gap-x-2"
+          title={secondary ? `${primary} — ${secondary}` : primary}
+        >
+          <span className="truncate font-mono text-sm font-medium">
+            {primary}
+          </span>
+          {secondary ? (
+            <span className="text-muted-foreground truncate text-sm">
+              {secondary}
             </span>
           ) : null}
         </span>
@@ -175,6 +181,7 @@ export function AgentFormDialog({
   agent?: Agent | null;
 }) {
   const { t, locale } = useI18n();
+  const router = useRouter();
   const { user } = useAuth();
   const createAgent = useCreateAgent();
   const updateAgent = useUpdateAgent();
@@ -191,29 +198,63 @@ export function AgentFormDialog({
   const [nameError, setNameError] = useState("");
   const [description, setDescription] = useState("");
   const [model, setModel] = useState<string | null>(null);
-  const [knowledgeScenario, setKnowledgeScenario] = useState<string | null>(
-    null,
-  );
   const [soul, setSoul] = useState("");
-  const [soulGenerating, setSoulGenerating] = useState(false);
   const [spaces, setSpaces] = useState<string[]>([]);
   const [models, setModels] = useState<
     Awaited<ReturnType<typeof loadModels>>["models"]
   >([]);
-  const [scenarios, setScenarios] = useState<
-    Awaited<ReturnType<typeof listScenarios>>["items"]
-  >([]);
 
   useEffect(() => {
     if (!open) return;
+
+    const pendingSoul =
+      typeof window !== "undefined"
+        ? window.sessionStorage.getItem(AGENT_SOUL_DRAFT_SOUL_KEY)
+        : null;
+    const pendingFormRaw =
+      typeof window !== "undefined"
+        ? window.sessionStorage.getItem(AGENT_SOUL_DRAFT_FORM_KEY)
+        : null;
+
+    let pendingForm: PendingAgentForm | null = null;
+    if (pendingFormRaw) {
+      try {
+        pendingForm = JSON.parse(pendingFormRaw) as PendingAgentForm;
+      } catch {
+        pendingForm = null;
+      }
+      window.sessionStorage.removeItem(AGENT_SOUL_DRAFT_FORM_KEY);
+    }
+    if (pendingSoul) {
+      window.sessionStorage.removeItem(AGENT_SOUL_DRAFT_SOUL_KEY);
+    }
+
+    const pendingMatchesMode =
+      pendingForm?.mode === (isCreate ? "create" : "edit");
+
+    if (pendingForm && pendingMatchesMode) {
+      setAgentName(pendingForm.name);
+      setNameError("");
+      setDescription(pendingForm.description);
+      setModel(pendingForm.model);
+      setSpaces(pendingForm.spaces);
+      setSoul(pendingSoul ?? pendingForm.soul);
+      if (pendingSoul) {
+        toast.success(t.agents.soulGenerated);
+      }
+      return;
+    }
+
     if (isCreate) {
       setAgentName("");
       setNameError("");
       setDescription("");
       setModel(null);
-      setKnowledgeScenario(null);
-      setSoul("");
+      setSoul(pendingSoul ?? "");
       setSpaces([]);
+      if (pendingSoul) {
+        toast.success(t.agents.soulGenerated);
+      }
       return;
     }
     if (!agent) return;
@@ -221,33 +262,25 @@ export function AgentFormDialog({
     setNameError("");
     setDescription(agent.description ?? "");
     setModel(agent.model ?? null);
-    setKnowledgeScenario(agent.knowledge_scenario ?? null);
-    setSoul(agent.soul ?? "");
+    setSoul(pendingSoul ?? agent.soul ?? "");
     setSpaces(
       Array.isArray(agent.knowledge_spaces) ? [...agent.knowledge_spaces] : [],
     );
-  }, [open, isCreate, agent]);
+    if (pendingSoul) {
+      toast.success(t.agents.soulGenerated);
+    }
+  }, [open, isCreate, agent, t.agents.soulGenerated]);
 
   useEffect(() => {
     if (!open) return;
     void loadModels()
       .then((res) => setModels(res.models))
       .catch(() => setModels([]));
-    void listScenarios()
-      .then((res) => setScenarios(res.items))
-      .catch(() => setScenarios([]));
   }, [open]);
 
-  const filteredSpaces = useMemo(() => {
-    if (!knowledgeScenario) return availableSpaces;
-    return availableSpaces.filter(
-      (space) => boundScenarioType(space) === knowledgeScenario,
-    );
-  }, [availableSpaces, knowledgeScenario]);
-
   const visibleSpaceIds = useMemo(
-    () => filteredSpaces.map((space) => space.id),
-    [filteredSpaces],
+    () => availableSpaces.map((space) => space.id),
+    [availableSpaces],
   );
 
   const boundInView = visibleSpaceIds.filter((id) =>
@@ -273,32 +306,37 @@ export function AgentFormDialog({
     setSpaces((prev) => [...new Set([...prev, ...visibleSpaceIds])]);
   }
 
-  async function handleGenerateSoul() {
-    const trimmedName = (agentName.trim() || agent?.name) ?? "";
-    setSoulGenerating(true);
-    try {
-      const result = await generateSoul({
-        name: trimmedName,
-        description: description.trim(),
-        soul: soul.trim(),
-        locale,
-        model_name: model ?? undefined,
-      });
-      setSoul(result.soul);
-      toast.success(t.agents.soulGenerated);
-    } catch (err) {
-      if (err instanceof AgentsApiDisabledError) {
-        toast.error(t.agents.nameStepApiDisabledError);
-      } else {
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t.agents.soulGenerateError,
-        );
-      }
-    } finally {
-      setSoulGenerating(false);
+  function handleOpenSoulGenerate() {
+    const trimmedName = agentName.trim();
+    if (!trimmedName || !NAME_RE.test(trimmedName)) {
+      setNameError(t.agents.nameStepInvalidError);
+      return;
     }
+
+    const snapshot: PendingAgentForm = {
+      mode: isCreate ? "create" : "edit",
+      name: trimmedName,
+      description: description.trim(),
+      model,
+      spaces,
+      soul: soul.trim(),
+    };
+    window.sessionStorage.setItem(
+      AGENT_SOUL_DRAFT_FORM_KEY,
+      JSON.stringify(snapshot),
+    );
+
+    const params = new URLSearchParams({
+      draft: "1",
+      name: trimmedName,
+    });
+    const trimmedDescription = description.trim();
+    if (trimmedDescription) {
+      params.set("description", trimmedDescription);
+    }
+
+    onOpenChange(false);
+    router.push(`/workspace/agents/new?${params.toString()}`);
   }
 
   async function handleSave() {
@@ -336,7 +374,6 @@ export function AgentFormDialog({
       model,
       soul,
       knowledge_spaces: spaces,
-      knowledge_scenario: knowledgeScenario,
     };
 
     try {
@@ -437,15 +474,11 @@ export function AgentFormDialog({
               size="sm"
               variant="outline"
               className={dialogInlineButtonClass}
-              disabled={soulGenerating || isPending}
-              onClick={() => void handleGenerateSoul()}
+              disabled={isPending}
+              onClick={handleOpenSoulGenerate}
             >
-              {soulGenerating ? (
-                <Loader2Icon className="size-3.5 animate-spin" />
-              ) : (
-                <SparklesIcon className="size-3.5" />
-              )}
-              {soulGenerating ? t.agents.soulGenerating : t.agents.soulGenerate}
+              <SparklesIcon className="size-3.5" />
+              {t.agents.soulGenerate}
             </Button>
           </div>
           <DialogTextareaField
@@ -454,43 +487,27 @@ export function AgentFormDialog({
             autoGrow
             placeholder={t.agents.soulHint}
             textareaClassName="font-mono"
-            disabled={soulGenerating || isPending}
+            disabled={isPending}
           />
         </DialogFormSection>
 
         <DialogFormSection title={t.agents.sectionCapability}>
-          <DialogFieldGrid>
-            <DialogSelectField
-              label={t.agents.fieldModel}
-              value={model ?? INHERIT_VALUE}
-              onValueChange={(value) =>
-                setModel(value === INHERIT_VALUE ? null : value)
-              }
-              placeholder={t.agents.modelInherit}
-              disabled={isPending}
-              options={[
-                { value: INHERIT_VALUE, label: t.agents.modelInherit },
-                ...models.map((item) => ({
-                  value: item.name,
-                  label: item.display_name ?? item.name,
-                })),
-              ]}
-            />
-            <DialogSlotField label={t.agents.fieldKnowledgeScenario}>
-              <ScenarioSelect
-                value={knowledgeScenario ?? INHERIT_VALUE}
-                onValueChange={(value) =>
-                  setKnowledgeScenario(value === INHERIT_VALUE ? null : value)
-                }
-                scenarios={scenarios}
-                disabled={isPending}
-                className={cn("w-full", selectTriggerWrapClass)}
-                placeholder={t.knowledge.selectScenario}
-                inheritLabel={t.agents.scenarioInherit}
-                inheritValue={INHERIT_VALUE}
-              />
-            </DialogSlotField>
-          </DialogFieldGrid>
+          <DialogSelectField
+            label={t.agents.fieldModel}
+            value={model ?? INHERIT_VALUE}
+            onValueChange={(value) =>
+              setModel(value === INHERIT_VALUE ? null : value)
+            }
+            placeholder={t.agents.modelInherit}
+            disabled={isPending}
+            options={[
+              { value: INHERIT_VALUE, label: t.agents.modelInherit },
+              ...models.map((item) => ({
+                value: item.name,
+                label: item.display_name ?? item.name,
+              })),
+            ]}
+          />
         </DialogFormSection>
 
         <DialogFormSection title={t.agents.knowledgeTitle}>
@@ -499,12 +516,12 @@ export function AgentFormDialog({
               <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
                 {t.agents.knowledgeBoundCount
                   .replace("{bound}", String(boundInView))
-                  .replace("{total}", String(filteredSpaces.length))}
+                  .replace("{total}", String(availableSpaces.length))}
               </span>
             ) : (
               <span />
             )}
-            {filteredSpaces.length > 0 ? (
+            {availableSpaces.length > 0 ? (
               <Button
                 type="button"
                 size="sm"
@@ -532,18 +549,9 @@ export function AgentFormDialog({
                 </Link>
               </Button>
             </InlineEmpty>
-          ) : knowledgeScenario && filteredSpaces.length === 0 ? (
-            <InlineEmpty>
-              <p>
-                {t.agents.knowledgeScenarioEmpty.replace(
-                  "{scenario}",
-                  scenarioLabel(knowledgeScenario, t.knowledge),
-                )}
-              </p>
-            </InlineEmpty>
           ) : (
             <ul className="grid max-h-48 gap-2 overflow-y-auto">
-              {filteredSpaces.map((space) => (
+              {availableSpaces.map((space) => (
                 <li key={space.id}>
                   <SpaceMountRow
                     space={space}
@@ -584,32 +592,30 @@ export function AgentCard({ agent, spaces = [], onEdit }: AgentCardProps) {
   const { t } = useI18n();
   const chatHref = newChatHref(agent.name);
 
-  const spaceNameById = useMemo(
-    () => new Map(spaces.map((s) => [s.id, s.name])),
-    [spaces],
-  );
-  const knowledgeSpaces = agent.knowledge_spaces ?? [];
-
   const metaTags = useMemo(() => {
+    const knowledgeSpaces = agent.knowledge_spaces ?? [];
     const tags: Array<{ key: string; label: ReactNode }> = [];
-    if (agent.model) {
-      tags.push({ key: "model", label: agent.model });
-    }
     for (const spaceId of knowledgeSpaces) {
+      const label = resolveSpaceDisplayLabel(spaceId, spaces);
       tags.push({
-        key: spaceId,
+        key: `space:${spaceId}`,
         label: (
           <>
             <BookOpenIcon className="size-2.5 shrink-0 opacity-70" />
-            <span className="max-w-32 truncate">
-              {spaceNameById.get(spaceId) ?? spaceId}
+            <span className="min-w-0 truncate" title={label}>
+              {label}
             </span>
           </>
         ),
       });
     }
-    return tags.length > 0 ? itemMetaTags(tags) : undefined;
-  }, [agent.model, knowledgeSpaces, spaceNameById]);
+    if (tags.length === 0) return undefined;
+    return tags.map(({ key, label }) => (
+      <MetaPill key={key} mono className="w-full min-w-0 whitespace-nowrap">
+        {label}
+      </MetaPill>
+    ));
+  }, [agent.knowledge_spaces, spaces]);
 
   return (
     <ItemCard
@@ -626,6 +632,7 @@ export function AgentCard({ agent, spaces = [], onEdit }: AgentCardProps) {
       }
       description={agent.description ?? undefined}
       metaTags={metaTags}
+      metaTagsLayout="inline-nowrap"
       href={chatHref}
       actions={
         <>

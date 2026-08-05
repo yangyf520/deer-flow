@@ -22,8 +22,8 @@ import type { Space } from "@/core/knowledge";
 import { buildSpaceEditMeta } from "@/core/knowledge";
 
 function SpaceFormFields({
-  name,
-  setName,
+  spaceId,
+  setSpaceId,
   description,
   setDescription,
   access,
@@ -35,10 +35,10 @@ function SpaceFormFields({
   score,
   setScore,
   disabled,
-  nameAutoFocus,
+  idAutoFocus,
 }: {
-  name: string;
-  setName: (v: string) => void;
+  spaceId: string;
+  setSpaceId: (v: string) => void;
   description: string;
   setDescription: (v: string) => void;
   access: string;
@@ -50,7 +50,7 @@ function SpaceFormFields({
   score: string;
   setScore: (v: string) => void;
   disabled?: boolean;
-  nameAutoFocus?: boolean;
+  idAutoFocus?: boolean;
 }) {
   const { t } = useI18n();
 
@@ -59,11 +59,13 @@ function SpaceFormFields({
       <DialogFieldGrid>
         <DialogInputField
           label={t.knowledge.fieldName}
-          value={name}
-          onChange={setName}
+          value={spaceId}
+          onChange={setSpaceId}
           placeholder={t.knowledge.namePlaceholder}
           disabled={disabled}
-          autoFocus={nameAutoFocus}
+          autoFocus={idAutoFocus}
+          autoCapitalize="none"
+          autoCorrect="off"
         />
         <DialogInputField
           label={t.knowledge.fieldDescription}
@@ -120,8 +122,8 @@ function SpaceFormFields({
 interface SpaceCreateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  name: string;
-  setName: (v: string) => void;
+  spaceId: string;
+  setSpaceId: (v: string) => void;
   description: string;
   setDescription: (v: string) => void;
   access: string;
@@ -139,8 +141,8 @@ interface SpaceCreateDialogProps {
 export function SpaceCreateDialog({
   open,
   onOpenChange,
-  name,
-  setName,
+  spaceId,
+  setSpaceId,
   description,
   setDescription,
   access,
@@ -163,13 +165,13 @@ export function SpaceCreateDialog({
       title={t.knowledge.createSpace}
       {...dialogSaveFooterProps(t.common, {
         busy,
-        disabled: !name.trim(),
+        disabled: !spaceId.trim(),
       })}
       onConfirm={onConfirm}
     >
       <SpaceFormFields
-        name={name}
-        setName={setName}
+        spaceId={spaceId}
+        setSpaceId={setSpaceId}
         description={description}
         setDescription={setDescription}
         access={access}
@@ -181,7 +183,7 @@ export function SpaceCreateDialog({
         score={score}
         setScore={setScore}
         disabled={busy}
-        nameAutoFocus={open}
+        idAutoFocus={open}
       />
     </FormDialog>
   );
@@ -191,8 +193,8 @@ interface SpaceEditDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   space: Space | null;
-  name: string;
-  setName: (v: string) => void;
+  spaceId: string;
+  setSpaceId: (v: string) => void;
   description: string;
   setDescription: (v: string) => void;
   access: string;
@@ -213,8 +215,8 @@ export function SpaceEditDialog({
   open,
   onOpenChange,
   space,
-  name,
-  setName,
+  spaceId,
+  setSpaceId,
   description,
   setDescription,
   access,
@@ -244,7 +246,7 @@ export function SpaceEditDialog({
         editResourceMeta={editResourceMeta}
         {...dialogSaveFooterProps(t.common, {
           busy: pending,
-          disabled: !name.trim(),
+          disabled: !spaceId.trim(),
         })}
         onConfirm={onConfirm}
         leadingDestructive={{
@@ -254,8 +256,8 @@ export function SpaceEditDialog({
         }}
       >
         <SpaceFormFields
-          name={name}
-          setName={setName}
+          spaceId={spaceId}
+          setSpaceId={setSpaceId}
           description={description}
           setDescription={setDescription}
           access={access}
@@ -267,7 +269,7 @@ export function SpaceEditDialog({
           score={score}
           setScore={setScore}
           disabled={pending}
-          nameAutoFocus={open}
+          idAutoFocus={open}
         />
       </FormDialog>
 

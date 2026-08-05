@@ -62,6 +62,95 @@ export function boundScenarioType(
   return space.scenario ?? space.default_scenarios?.[0] ?? null;
 }
 
+/** User-facing label for a knowledge space (description first, then id). */
+export function spaceDisplayLabel(space: {
+  id: string;
+  description?: string | null;
+}): string {
+  const description = space.description?.trim();
+  if (description) return description;
+  return space.id;
+}
+
+function isGenericSpaceId(id: string): boolean {
+  const trimmed = id.trim();
+  return (
+    trimmed === "space" || trimmed === "default" || /^space-\d+$/i.test(trimmed)
+  );
+}
+
+/** Primary space code (空间编号 / scenario code). */
+export function spacePrimaryCode(space: {
+  id: string;
+  name?: string | null;
+  scenario?: string | null;
+  default_scenarios?: string[] | null;
+}): string {
+  const id = space.id.trim();
+  const name = space.name?.trim() ?? "";
+  const scenario = boundScenarioType(space);
+
+  if (id && !isGenericSpaceId(id)) return id;
+  if (name && /^[a-z0-9][a-z0-9_-]*$/i.test(name) && !isGenericSpaceId(name)) {
+    return name;
+  }
+  if (scenario) return scenario;
+  return id ? id : name ? name : "";
+}
+
+/** Human description shown beside the space code when present. */
+export function spaceSecondaryDescription(
+  space: { description?: string | null },
+  primary: string,
+): string | null {
+  const description = space.description?.trim();
+  if (!description || description === primary) return null;
+  return description;
+}
+
+/** Machine-facing code beside the description (空间编号 or scenario code). */
+export function spaceCodeLabel(space: {
+  id: string;
+  name?: string | null;
+  description?: string | null;
+  scenario?: string | null;
+  default_scenarios?: string[] | null;
+}): string | null {
+  const code = spacePrimaryCode(space);
+  return code ? code : null;
+}
+
+/** Resolve a bound space id to a user-facing label. */
+export function resolveSpaceDisplayLabel(
+  spaceId: string,
+  spaces: {
+    id: string;
+    name?: string | null;
+    description?: string | null;
+    scenario?: string | null;
+    default_scenarios?: string[] | null;
+  }[],
+): string {
+  const match = spaces.find((s) => s.id === spaceId || s.name === spaceId);
+  if (match) return spaceDisplayLabel(match);
+  return spaceId;
+}
+
+export function resolveSpaceCodeLabel(
+  spaceId: string,
+  spaces: {
+    id: string;
+    name?: string | null;
+    description?: string | null;
+    scenario?: string | null;
+    default_scenarios?: string[] | null;
+  }[],
+): string | null {
+  const match = spaces.find((s) => s.id === spaceId || s.name === spaceId);
+  if (match) return spaceCodeLabel(match);
+  return isGenericSpaceId(spaceId) ? null : spaceId;
+}
+
 /** Default document kind for import when the UI no longer exposes kind selection. */
 export function importKindForSpace(
   space: {

@@ -53,8 +53,8 @@ export function SpaceCard({ space, onEdit }: SpaceCardProps) {
     <ItemCard
       icon={BookOpenIcon}
       iconTone="knowledge"
-      title={space.name}
-      description={space.description ?? undefined}
+      title={space.id}
+      description={space.description ?? space.name}
       metaTags={metaTags}
       href={href}
       badges={

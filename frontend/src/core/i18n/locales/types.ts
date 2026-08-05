@@ -427,6 +427,17 @@ export interface Translations {
     soulGenerating: string;
     soulGenerateError: string;
     soulGenerated: string;
+    soulDraftPageTitle: string;
+    soulDraftBootstrapMessage: string;
+    soulDraftDescriptionPart: string;
+    soulDraftFinishMessage: string;
+    soulDraftConfirm: string;
+    soulDraftConfirmTitle: string;
+    soulDraftConfirmHint: string;
+    soulDraftReturn: string;
+    soulDraftBackToChat: string;
+    soulDraftChatPlaceholder: string;
+    soulDraftExtractError: string;
     sectionCapability: string;
     knowledgeTitle: string;
     knowledgeBoundCount: string;

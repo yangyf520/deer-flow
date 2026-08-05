@@ -287,6 +287,7 @@ export async function createSpace(input: {
 export async function updateSpace(
   spaceId: string,
   input: {
+    id?: string;
     scenario?: string;
     name?: string;
     description?: string;
