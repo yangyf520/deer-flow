@@ -484,10 +484,11 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
     # Memory API is mounted at /api/memory
     app.include_router(memory.router)
 
-    # Knowledge API is mounted at /api/knowledge/v1
+    # Knowledge API is mounted at /api/v1/knowledge
     app.include_router(knowledge.router)
 
-    # Document API: /api/doc/parse, /api/doc/embed/{space_id}
+    # Document API: /api/v1/document/parse
+    # Knowledge import: POST /api/v1/knowledge/spaces/{space_id}/documents
     app.include_router(doc.router)
 
     # Skills API is mounted at /api/skills
@@ -523,7 +524,7 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
     # Assistants compatibility API (LangGraph Platform stub)
     app.include_router(assistants_compat.router)
 
-    # Auth API is mounted at /api/v1/auth
+    # Auth API is mounted at /api/auth
     app.include_router(auth.router)
     app.include_router(api_keys.register_api_key_routes())
 

@@ -2207,13 +2207,13 @@ authorization:
 #
 # Keycloak setup:
 #   1. Create a client with type "confidential" and Standard Flow enabled
-#   2. Add Valid Redirect URI: http://localhost:8001/api/v1/auth/callback/keycloak
+#   2. Add Valid Redirect URI: http://localhost:8001/api/auth/callback/keycloak
 #   3. Add Web Origin: http://localhost:8001 (or your frontend origin)
 
 # ============================================================================
 # Local (email/password) authentication
 # ============================================================================
-# Self-registration via POST /api/v1/auth/register is open by default: anyone
+# Self-registration via POST /api/auth/register is open by default: anyone
 # who can reach the Gateway may create a regular user account.
 #
 # The OIDC provisioning policy below (allowed_email_domains, require_verified_email,
@@ -2241,7 +2241,7 @@ authorization:
 #         client_id: deerflow
 #         client_secret: $KEYCLOAK_CLIENT_SECRET
 #         # Optional: explicitly set the callback URL.
-#         # redirect_uri: https://deerflow.example.com/api/v1/auth/callback/keycloak
+#         # redirect_uri: https://deerflow.example.com/api/auth/callback/keycloak
 #         scopes:
 #           - openid
 #           - email

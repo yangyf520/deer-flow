@@ -1,8 +1,10 @@
-"""Knowledge Gateway API: /api/knowledge/v1"""
+"""Knowledge Gateway API: /api/v1/knowledge"""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from typing import Annotated
+
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 
 from app.gateway.authz import require_auth, require_permission
 from deerflow.config.knowledge_config import get_knowledge_config
@@ -34,7 +36,7 @@ from deerflow.knowledge.service import (
 from deerflow.persistence.engine import get_session_factory
 from deerflow.persistence.knowledge.model import KnowledgeDocumentRow
 
-router = APIRouter(prefix="/api/knowledge/v1", tags=["knowledge"])
+router = APIRouter(prefix="/api/v1/knowledge", tags=["knowledge"])
 
 
 def _session_factory():
@@ -358,6 +360,58 @@ async def list_documents(
     return DocumentsListResponse(items=items, total=total, limit=limit, offset=offset)
 
 
+@router.post("/spaces/{space_id}/documents", response_model=DocumentImportResponse, status_code=201)
+@require_auth
+@require_permission("knowledge", "write")
+async def import_document(
+    space_id: str,
+    request: Request,
+    file: UploadFile | None = File(None),
+    title: str | None = Form(None),
+    kind: str = Form(...),
+    tags: Annotated[list[str], Form()] = [],
+    attrs: str | None = Form(None, description="JSON object of document-level custom metadata"),
+    segments: str | None = Form(
+        None,
+        description='JSON array of {"text":"...", "metadata": {...}} for pre-chunked rows (e.g. row_no)',
+    ),
+) -> DocumentImportResponse:
+    """Import a file or structured segments into a knowledge space (parse, chunk, embed)."""
+    require_knowledge_extra()
+    user = _user(request)
+    factory = _session_factory()
+    async with factory() as session:
+        await knowledge_service.get_space_or_404(
+            session,
+            space_id=space_id,
+            user_id=_uid(user),
+            system_role=user.system_role,
+            min_role="editor",
+        )
+    parsed_attrs = knowledge_service.parse_embed_attrs_json(attrs)
+    parsed_segments = knowledge_service.parse_embed_segments_json(segments)
+    data = b""
+    filename = "segments.json"
+    if file is not None:
+        data = await file.read()
+        filename = file.filename or "upload.bin"
+    if not data and parsed_segments is None:
+        raise HTTPException(status_code=400, detail="file or segments required")
+    return await knowledge_service.import_document(
+        factory,
+        space_id=space_id,
+        user_id=_uid(user),
+        filename=filename,
+        content_type=file.content_type if file is not None else "application/json",
+        data=data,
+        title=title,
+        kind=kind,
+        tags=tags or None,
+        attrs=parsed_attrs or None,
+        segments=parsed_segments,
+    )
+
+
 @router.get("/spaces/{space_id}/documents/{doc_id}", response_model=DocumentResponse)
 @require_auth
 @require_permission("knowledge", "read")
@@ -402,6 +456,7 @@ async def patch_document(
             effective_from=body.effective_from,
             effective_to=body.effective_to,
             title=body.title,
+            attrs=body.attrs,
         )
 
 
@@ -470,7 +525,7 @@ async def reindex_document(
     return DocumentImportResponse(doc_id=doc.id, status=doc.status, job_phase=doc.job_phase, progress=doc.progress)
 
 
-@router.post("/search", response_model=EvidencePackResponse)
+@router.post("/search", response_model=EvidencePackResponse, response_model_exclude_none=True)
 @require_auth
 @require_permission("knowledge", "read")
 async def search(body: KnowledgeSearchRequest, request: Request) -> EvidencePackResponse:

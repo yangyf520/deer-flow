@@ -2,7 +2,7 @@ import { throwGatewayApiError } from "@/core/api/errors";
 import { fetch } from "@/core/api/fetcher";
 import { getBackendBaseURL } from "@/core/config";
 
-export type DocumentEmbedResponse = {
+export type DocumentImportResponse = {
   doc_id: string;
   status: string;
   job_phase: string;
@@ -11,12 +11,18 @@ export type DocumentEmbedResponse = {
   message?: string | null;
 };
 
-export async function embedDocument(
+export async function importDocument(
   spaceId: string,
   file: File,
-  opts: { kind: string; title?: string; tags?: string[] },
+  opts: {
+    kind: string;
+    title?: string;
+    tags?: string[];
+    attrs?: Record<string, unknown>;
+    segments?: Array<{ text: string; metadata?: Record<string, unknown> }>;
+  },
   options?: { signal?: AbortSignal },
-): Promise<DocumentEmbedResponse> {
+): Promise<DocumentImportResponse> {
   const form = new FormData();
   form.append("file", file);
   form.append("kind", opts.kind);
@@ -24,9 +30,15 @@ export async function embedDocument(
   for (const tag of opts.tags ?? []) {
     if (tag.trim()) form.append("tags", tag.trim());
   }
+  if (opts.attrs && Object.keys(opts.attrs).length > 0) {
+    form.append("attrs", JSON.stringify(opts.attrs));
+  }
+  if (opts.segments && opts.segments.length > 0) {
+    form.append("segments", JSON.stringify(opts.segments));
+  }
 
   const response = await fetch(
-    `${getBackendBaseURL()}/api/doc/embed/${encodeURIComponent(spaceId)}`,
+    `${getBackendBaseURL()}/api/v1/knowledge/spaces/${encodeURIComponent(spaceId)}/documents`,
     {
       method: "POST",
       body: form,
@@ -35,8 +47,8 @@ export async function embedDocument(
   );
 
   if (!response.ok) {
-    await throwGatewayApiError(response, "Failed to embed document");
+    await throwGatewayApiError(response, "Failed to import document");
   }
 
-  return response.json() as Promise<DocumentEmbedResponse>;
+  return response.json() as Promise<DocumentImportResponse>;
 }

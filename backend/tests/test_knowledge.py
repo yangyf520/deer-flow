@@ -805,7 +805,7 @@ def test_scenario_pack_defaults():
 
 def test_search_requires_auth():
     client = TestClient(_api_app())
-    assert client.post("/api/knowledge/v1/search", json={"query": "hello"}).status_code == 401
+    assert client.post("/api/v1/knowledge/search", json={"query": "hello"}).status_code == 401
 
 
 @pytest.mark.asyncio
@@ -1085,7 +1085,7 @@ def test_ensure_kind_allowed_respects_space_whitelist():
 def test_kinds_api_lists_catalog():
     client = TestClient(_api_app())
     res = client.get(
-        "/api/knowledge/v1/kinds",
+        "/api/v1/knowledge/kinds",
         headers={"Authorization": "Bearer test-token"},
     )
     assert res.status_code in (200, 401, 403)
@@ -1158,7 +1158,7 @@ def test_list_configured_tag_groups_derived_from_lanes():
 def test_knowledge_catalog_api():
     client = TestClient(_api_app())
     res = client.get(
-        "/api/knowledge/v1/catalog",
+        "/api/v1/knowledge/catalog",
         headers={"Authorization": "Bearer test-token"},
     )
     assert res.status_code in (200, 401, 403)
@@ -1301,3 +1301,114 @@ def test_compact_scenario_attrs_drops_redundant_fields():
     )
     assert host["host_space_id"] == "legal-kb"
     assert "space_id" not in host
+
+
+def test_custom_metadata_from_chunk_excludes_system_keys():
+    from deerflow.knowledge.rag import custom_metadata_from_chunk
+
+    meta = {
+        "space_id": "s1",
+        "doc_id": "d1",
+        "row_no": 12,
+        "source_table": "orders",
+        "_internal": "skip",
+    }
+    assert custom_metadata_from_chunk(meta) == {"row_no": 12, "source_table": "orders"}
+
+
+def test_user_attrs_from_metadata_omits_system_keys():
+    from deerflow.knowledge.rag import user_attrs_from_metadata
+
+    meta = {
+        "space_id": "legal",
+        "doc_id": "d1",
+        "block": "text",
+        "heading_path": "§1",
+        "page_no": 3,
+        "scenario": "policy-review",
+        "row_no": 7,
+        "detail_id": "rule-42",
+    }
+    assert user_attrs_from_metadata(meta) == {"row_no": 7, "detail_id": "rule-42"}
+    assert user_attrs_from_metadata({}) == {}
+
+
+def test_attach_user_attrs_sets_field_only_when_present():
+    from deerflow.knowledge.service import EvidenceItem, _attach_user_attrs
+
+    with_attrs = EvidenceItem(
+        id="e1",
+        source="chunk",
+        kind="policy",
+        title="t",
+        snippet="s",
+        metadata={"doc_id": "d1", "row_no": 3},
+    )
+    without = EvidenceItem(
+        id="e2",
+        source="chunk",
+        kind="policy",
+        title="t",
+        snippet="s",
+        metadata={"doc_id": "d1", "heading_path": "§1"},
+    )
+    _attach_user_attrs([with_attrs, without])
+    assert with_attrs.attrs == {"row_no": 3}
+    assert without.attrs is None
+
+
+def test_parse_embed_segments_json():
+    from deerflow.knowledge.service import parse_embed_segments_json
+
+    segments = parse_embed_segments_json('[{"text":"row one","metadata":{"row_no":1}}, {"text":"row two","metadata":{"row_no":2}}]')
+    assert segments is not None
+    assert len(segments) == 2
+    assert segments[0].metadata["row_no"] == 1
+
+
+def test_merge_custom_metadata_preserves_system_keys():
+    from deerflow.knowledge.rag import merge_custom_metadata
+
+    base = {"space_id": "s1", "doc_id": "d1", "kind": "general"}
+    merged = merge_custom_metadata(base, {"row_no": 3, "space_id": "evil", "doc_id": "x"})
+    assert merged["space_id"] == "s1"
+    assert merged["doc_id"] == "d1"
+    assert merged["row_no"] == 3
+
+
+def test_search_space_returns_custom_chunk_metadata():
+    from deerflow.knowledge import rag
+
+    node = SimpleNamespace(
+        node_id="n1",
+        metadata={
+            "space_id": "legal",
+            "doc_id": "d1",
+            "kind": "general",
+            "title": "Doc",
+            "release": "current",
+            "tags": "",
+            "row_no": 7,
+            "batch_id": "b-1",
+        },
+        text="snippet text",
+        relationships={},
+    )
+    scored = SimpleNamespace(node=node, score=0.9, get_content=lambda: "snippet text")
+
+    with (
+        patch.object(rag, "get_knowledge_config") as cfg,
+        patch.object(rag, "_build_retriever", return_value=SimpleNamespace(retrieve=lambda _q: [scored])),
+        patch.object(rag, "_apply_score_cutoff", side_effect=lambda nodes, _cutoff: nodes),
+        patch.object(rag, "rank_by_temporal", side_effect=lambda items, **_kw: items),
+        patch.object(rag, "stable_rank_items", side_effect=lambda items: items),
+    ):
+        cfg.return_value.retrieval.top_k = 5
+        cfg.return_value.retrieval.retrieve_n = 10
+        cfg.return_value.retrieval.similarity_cutoff = 0.0
+        cfg.return_value.retrieval.snippet_max_chars = 500
+        cfg.return_value.retrieval.hybrid = False
+        cfg.return_value.retrieval.rerank = False
+        items = rag.search_space(space_ids=["legal"], query="test")
+    assert items[0]["metadata"]["row_no"] == 7
+    assert items[0]["metadata"]["batch_id"] == "b-1"

@@ -241,6 +241,27 @@ def trim_snippet(text: str, *, limit: int = DIGEST_SNIPPET_CHARS) -> str:
     return snippet[:limit].rstrip() + "…"
 
 
+def _digest_evidence_entry(item: dict[str, Any], *, snippet_chars: int = DIGEST_SNIPPET_CHARS) -> dict[str, Any]:
+    from deerflow.knowledge.rag import user_attrs_from_metadata
+
+    item_id = item.get("id")
+    entry: dict[str, Any] = {
+        "id": str(item_id).strip(),
+        "kind": item.get("kind"),
+        "source": item.get("source"),
+        "citable_as": item.get("citable_as"),
+        "snippet": trim_snippet(
+            str(item.get("snippet") or item.get("title") or ""),
+            limit=snippet_chars,
+        ),
+    }
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    attrs = user_attrs_from_metadata(meta)
+    if attrs:
+        entry["attrs"] = attrs
+    return entry
+
+
 def build_evidence_digest(
     section_results: list[dict[str, Any]],
     packs: list[dict[str, Any]],
@@ -262,18 +283,7 @@ def build_evidence_digest(
             item_id = item.get("id")
             if not isinstance(item_id, str) or not item_id.strip():
                 continue
-            evidence.append(
-                {
-                    "id": item_id.strip(),
-                    "kind": item.get("kind"),
-                    "source": item.get("source"),
-                    "citable_as": item.get("citable_as"),
-                    "snippet": trim_snippet(
-                        str(item.get("snippet") or item.get("title") or ""),
-                        limit=snippet_chars,
-                    ),
-                }
-            )
+            evidence.append(_digest_evidence_entry(item, snippet_chars=snippet_chars))
         digest.append(
             {
                 "section_id": row.get("section_id"),
@@ -762,6 +772,8 @@ def evidence_index(packs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 
 def enrich_citations(result: dict[str, Any], packs: list[dict[str, Any]]) -> None:
     """Fill display fields from Evidence Pack; grounding key remains citation.id."""
+    from deerflow.knowledge.rag import user_attrs_from_metadata
+
     index = evidence_index(packs)
     if not index:
         return
@@ -787,6 +799,9 @@ def enrich_citations(result: dict[str, Any], packs: list[dict[str, Any]]) -> Non
                 cite["page_no"] = meta["page_no"]
             if meta.get("heading_path") and not cite.get("heading_path"):
                 cite["heading_path"] = meta["heading_path"]
+            attrs = user_attrs_from_metadata(meta)
+            if attrs:
+                cite["attrs"] = attrs
 
 
 def build_references(result: dict[str, Any], packs: list[dict[str, Any]]) -> None:
@@ -796,6 +811,8 @@ def build_references(result: dict[str, Any], packs: list[dict[str, Any]]) -> Non
     references section is independently verifiable and cannot echo a
     hallucinated citation id.
     """
+    from deerflow.knowledge.rag import user_attrs_from_metadata
+
     index = evidence_index(packs)
     refs: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -816,19 +833,21 @@ def build_references(result: dict[str, Any], packs: list[dict[str, Any]]) -> Non
                     continue
                 seen.add(cid)
                 meta = ev.get("metadata") if isinstance(ev.get("metadata"), dict) else {}
-                refs.append(
-                    {
-                        "id": cid,
-                        "citable_as": ev.get("citable_as"),
-                        "title": ev.get("title"),
-                        "snippet": ev.get("snippet"),
-                        "source": ev.get("source"),
-                        "kind": ev.get("kind"),
-                        "doc_id": meta.get("doc_id"),
-                        "page_no": meta.get("page_no"),
-                        "heading_path": meta.get("heading_path"),
-                    }
-                )
+                ref: dict[str, Any] = {
+                    "id": cid,
+                    "citable_as": ev.get("citable_as"),
+                    "title": ev.get("title"),
+                    "snippet": ev.get("snippet"),
+                    "source": ev.get("source"),
+                    "kind": ev.get("kind"),
+                    "doc_id": meta.get("doc_id"),
+                    "page_no": meta.get("page_no"),
+                    "heading_path": meta.get("heading_path"),
+                }
+                attrs = user_attrs_from_metadata(meta)
+                if attrs:
+                    ref["attrs"] = attrs
+                refs.append(ref)
     result["references"] = refs
 
 

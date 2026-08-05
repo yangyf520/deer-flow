@@ -58,4 +58,4 @@ async def search_tool(
             top_k=top_k,
             scenario=scenario,
         )
-    return pack.model_dump_json()
+    return pack.model_dump_json(exclude_none=True)

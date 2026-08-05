@@ -19,7 +19,7 @@ API_KEY_PREFIX = "dfk_"
 _PREFIX_DISPLAY_LEN = 8
 _UNSET = object()
 
-router = APIRouter(prefix="/api/v1/auth/api-keys", tags=["auth"])
+router = APIRouter(prefix="/api/v1/auth/api-keys", tags=["api-keys"])
 
 
 @dataclass(frozen=True, slots=True)

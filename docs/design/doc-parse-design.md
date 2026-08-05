@@ -9,7 +9,7 @@
 ## 1. 流水线
 
 ```text
-POST /api/doc/parse（multipart: file + segment_prompt）
+POST /api/document/parse（multipart: file + segment_prompt）
   → parse_file_bytes（Docling；失败则 MarkItDown fallback）
   → MarkdownNodeParser 分块；若仅 1 块 → ATX # 或行首 **bold** 标题切分
   → 打包 batch（≤4000 字、≤10 段/批）→ 并行 run_oneshot_llm（≤4 并发）
@@ -45,11 +45,11 @@ POST /api/doc/parse（multipart: file + segment_prompt）
 
 ## 2. API
 
-`APIRouter(prefix="/api/doc")` → **`POST /api/doc/parse`**  
+`APIRouter(prefix="/api/document")` → **`POST /api/document/parse`**  
 鉴权：`runs:create`（同 input-polish）。
 
-**向量化入库（与 parse 同前缀）：** **`POST /api/doc/embed/{space_id}`**  
-鉴权：`knowledge:write`。multipart：`file`、`kind`、可选 `title`、`tags[]`。写入指定知识空间（解析 + 切块 + embed）。结构化上传流程：parse → 预览 → embed。
+**向量化入库：** **`POST /api/knowledge/spaces/{space_id}/documents`**  
+鉴权：`knowledge:write`。multipart：`file`、`kind`、可选 `title`、`tags[]`、`attrs`（JSON）、`segments`（JSON 预切块，含行号等 metadata）。结构化上传流程：parse → 预览 → import。
 
 | 字段 | 必填 | 说明 |
 |------|------|------|

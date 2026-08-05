@@ -117,7 +117,7 @@ export async function parseDocument(
   form.append("file", file);
   form.append("segment_prompt", segmentPrompt);
 
-  const response = await fetch(`${getBackendBaseURL()}/api/doc/parse`, {
+  const response = await fetch(`${getBackendBaseURL()}/api/v1/document/parse`, {
     method: "POST",
     body: form,
     signal: options?.signal,

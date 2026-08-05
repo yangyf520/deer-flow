@@ -175,7 +175,7 @@ export type EvidencePackResponse = {
   answer?: string | null;
 };
 
-const base = () => `${getBackendBaseURL()}/api/knowledge/v1`;
+const base = () => `${getBackendBaseURL()}/api/v1/knowledge`;
 
 function withLocale(init?: RequestInit): RequestInit {
   const locale = normalizeLocale(getLocaleFromCookie() ?? DEFAULT_LOCALE);

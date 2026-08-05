@@ -26,6 +26,78 @@ logger = logging.getLogger(__name__)
 # After a QueryFusion LLM failure, skip multi-query for the process lifetime (retry still works).
 _fusion_llm_disabled: bool = False
 
+# System chunk metadata keys — not treated as caller-defined custom fields.
+RESERVED_CHUNK_METADATA_KEYS = frozenset(
+    {
+        "space_id",
+        "doc_id",
+        "kind",
+        "sensitivity",
+        "release",
+        "title",
+        "parse_quality",
+        "tags",
+        "effective_from",
+        "effective_to",
+        "ref_doc_id",
+        "document_id",
+        "doc_hash",
+        "_node_content",
+        "excluded_embed_metadata_keys",
+        "excluded_llm_metadata_keys",
+    }
+)
+
+# Runtime Evidence fields — not caller-defined; omitted from ``attrs`` in JSON responses.
+EVIDENCE_SYSTEM_METADATA_KEYS = RESERVED_CHUNK_METADATA_KEYS | frozenset(
+    {
+        "block",
+        "heading_path",
+        "parent_id",
+        "page_no",
+        "asset_uri",
+        "scenario",
+        "spaces_searched",
+        "lane_id",
+        "lane_fallback",
+        "source_filename",
+        "doc_title",
+        "article_no",
+    }
+)
+
+
+def custom_metadata_from_chunk(meta: dict[str, Any]) -> dict[str, Any]:
+    """Return caller-defined fields stored on a vector chunk (excludes system keys)."""
+    out: dict[str, Any] = {}
+    for key, value in (meta or {}).items():
+        if not key or key.startswith("_") or key in RESERVED_CHUNK_METADATA_KEYS:
+            continue
+        out[key] = value
+    return out
+
+
+def user_attrs_from_metadata(meta: dict[str, Any] | None) -> dict[str, Any]:
+    """Caller-defined fields on Evidence metadata for JSON responses (omit when empty)."""
+    out: dict[str, Any] = {}
+    for key, value in (meta or {}).items():
+        if not key or key.startswith("_") or key in EVIDENCE_SYSTEM_METADATA_KEYS:
+            continue
+        out[key] = value
+    return out
+
+
+def merge_custom_metadata(base: dict[str, Any], custom: dict[str, Any] | None) -> dict[str, Any]:
+    """Merge document/segment attrs into ingest metadata without overriding system keys."""
+    out = dict(base)
+    if not custom:
+        return out
+    for key, value in custom.items():
+        if not key or key.startswith("_") or key in RESERVED_CHUNK_METADATA_KEYS:
+            continue
+        out[key] = value
+    return out
+
 
 def _instantiate(use: str, kwargs: dict[str, Any]) -> Any:
     """Assemble a LlamaIndex (or other) class from ``package.module:Class`` + kwargs."""
@@ -415,6 +487,55 @@ def patch_document_metadata(
         updated += 1
     if updated:
         persist_docstore(space_id, docstore)
+    return updated
+
+
+def _patch_pgvector_metadata_for_doc(vector_store: Any, *, doc_id: str, patch: dict[str, Any]) -> int:
+    """Merge ``patch`` into pgvector JSON metadata for all rows of a knowledge document."""
+    if not patch:
+        return 0
+    try:
+        from sqlalchemy import select
+    except ImportError:
+        return 0
+    if not hasattr(vector_store, "_initialize"):
+        return 0
+    vector_store._initialize()
+    if not hasattr(vector_store, "_session"):
+        return 0
+    table = getattr(vector_store, "_table_class", None)
+    if table is None:
+        return 0
+    updated = 0
+    with vector_store._session() as session, session.begin():
+        rows = session.execute(select(table).where(_pgvector_doc_id_filter(table, doc_id))).scalars().all()
+        for row in rows:
+            meta = _pg_row_metadata(row)
+            meta.update(patch)
+            if hasattr(row, "metadata_"):
+                row.metadata_ = meta
+            elif hasattr(row, "metadata"):
+                row.metadata = meta
+            updated += 1
+    return updated
+
+
+def sync_document_metadata(
+    *,
+    space_id: str,
+    doc_id: str,
+    patch: dict[str, Any],
+) -> int:
+    """Sync metadata onto docstore nodes and pgvector rows for a document."""
+    if not patch:
+        return 0
+    updated = patch_document_metadata(space_id=space_id, doc_id=doc_id, patch=patch)
+    try:
+        vector_store = get_vector_store(space_id)
+        if type(vector_store).__name__ == "PGVectorStore":
+            updated = max(updated, _patch_pgvector_metadata_for_doc(vector_store, doc_id=doc_id, patch=patch))
+    except Exception as exc:
+        logger.warning("pgvector metadata patch failed space=%s doc=%s: %s", space_id, doc_id, exc)
     return updated
 
 
@@ -953,6 +1074,7 @@ def ingest_document_text(
     release: str = "current",
     effective_from: datetime | None = None,
     effective_to: datetime | None = None,
+    doc_attrs: dict[str, Any] | None = None,
 ) -> int:
     from llama_index.core import Document, StorageContext, VectorStoreIndex
     from llama_index.core.ingestion import IngestionPipeline
@@ -973,6 +1095,7 @@ def ingest_document_text(
         base_meta["effective_from"] = effective_from.isoformat()
     if effective_to is not None:
         base_meta["effective_to"] = effective_to.isoformat()
+    base_meta = merge_custom_metadata(base_meta, doc_attrs)
     # id_=doc_id so PGVectorStore metadata.ref_doc_id == knowledge documents.id (delete cascade).
     # Exclude metadata from embedding — title is already prefixed into content.
     exclude_embed = list(base_meta.keys())
@@ -1579,6 +1702,16 @@ def search_space(
             if parent_info is not None and parent_id is None:
                 parent_id = getattr(parent_info, "node_id", None)
             block = meta.get("block") or annotate_block_type(str(raw_snippet or ""))
+            evidence_meta: dict[str, Any] = {
+                "space_id": meta.get("space_id") or space_id,
+                "doc_id": meta.get("doc_id"),
+                "block": block,
+                "heading_path": heading or None,
+                "parent_id": parent_id,
+                "page_no": meta.get("page_no"),
+                "asset_uri": meta.get("asset_uri"),
+            }
+            evidence_meta.update(custom_metadata_from_chunk(meta))
             items.append(
                 {
                     "id": pid,
@@ -1588,15 +1721,7 @@ def search_space(
                     "snippet": snippet,
                     "score": float(n.score or 0),
                     "citable_as": f"{title} / {heading}".strip(" /") if heading else title,
-                    "metadata": {
-                        "space_id": meta.get("space_id") or space_id,
-                        "doc_id": meta.get("doc_id"),
-                        "block": block,
-                        "heading_path": heading or None,
-                        "parent_id": parent_id,
-                        "page_no": meta.get("page_no"),
-                        "asset_uri": meta.get("asset_uri"),
-                    },
+                    "metadata": evidence_meta,
                 }
             )
     as_of_dt = parse_as_of(as_of_date)

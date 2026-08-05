@@ -193,7 +193,7 @@ Agent 绑库（二选一或并存）
 
 ## 7. HTTP API
 
-**前缀：** `/api/knowledge/v1`  
+**前缀：** `/api/knowledge`  
 **路由实现：** `app/gateway/routers/knowledge.py`  
 **请求与响应模型：** `deerflow/knowledge/service.py`
 
@@ -212,7 +212,7 @@ Agent 绑库（二选一或并存）
 | GET | `/spaces/{space_id}/grants` | 列出空间授权（`subject_type` + `subject_id` + `role`） |
 | PUT | `/spaces/{space_id}/grants` | 新增或更新授权（body: `subject_type` user\|dept、`subject_id`、`role`） |
 | DELETE | `/spaces/{space_id}/grants/{subject_type}/{subject_id}` | 删除授权 |
-| POST | — | 上传入库见 **`POST /api/doc/embed/{space_id}`**（与 parse 同 `/api/doc` 前缀） |
+| POST | `/spaces/{space_id}/documents` | 上传入库（multipart：`file`、`kind`、可选 `title`、`tags[]`、`attrs`、`segments`） |
 | GET | `/spaces/{space_id}/documents` | 文档列表（`kind`、`q`、`limit`、`offset`） |
 | GET | `/spaces/{space_id}/documents/{doc_id}` | 文档详情 |
 | PATCH | `/spaces/{space_id}/documents/{doc_id}` | 更新文档元数据 |

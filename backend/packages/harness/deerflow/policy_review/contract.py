@@ -39,6 +39,7 @@ class Citation(StrictModel):
     doc_id: str | None = None
     page_no: int | None = None
     heading_path: str | None = None
+    attrs: dict[str, Any] | None = None
 
 
 class FindingEvidence(StrictModel):
@@ -107,6 +108,7 @@ class Reference(StrictModel):
     doc_id: str | None = None
     page_no: int | None = None
     heading_path: str | None = None
+    attrs: dict[str, Any] | None = None
 
 
 class Audit(StrictModel):

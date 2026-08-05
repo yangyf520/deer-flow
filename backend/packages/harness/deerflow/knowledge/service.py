@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import re
 import uuid
@@ -26,12 +27,13 @@ from deerflow.knowledge.rag import (
     get_scenario_config,
     ingest_document_text,
     lane_pool_k,
+    merge_custom_metadata,
     parse_as_of,
-    patch_document_metadata,
     rename_space_vectors,
     resolve_scenario,
     scenario_kind_ids,
     search_space,
+    sync_document_metadata,
 )
 from deerflow.knowledge.rag import (
     list_document_chunks as rag_list_document_chunks,
@@ -463,6 +465,7 @@ class DocumentResponse(BaseModel):
     effective_to: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    attrs: dict[str, Any] = Field(default_factory=dict)
 
 
 class DocumentsListResponse(BaseModel):
@@ -502,12 +505,55 @@ class DocumentImportResponse(BaseModel):
     message: str | None = None
 
 
+class EmbedSegment(BaseModel):
+    text: str = Field(min_length=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+def parse_embed_attrs_json(raw: str | None) -> dict[str, Any]:
+    if raw is None or not str(raw).strip():
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail=f"invalid attrs JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=422, detail="attrs must be a JSON object")
+    return {str(k): v for k, v in parsed.items()}
+
+
+def parse_embed_segments_json(raw: str | None) -> list[EmbedSegment] | None:
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail=f"invalid segments JSON: {exc}") from exc
+    if not isinstance(parsed, list):
+        raise HTTPException(status_code=422, detail="segments must be a JSON array")
+    segments: list[EmbedSegment] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=422, detail="each segment must be a JSON object")
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        meta = item.get("metadata")
+        if meta is not None and not isinstance(meta, dict):
+            raise HTTPException(status_code=422, detail="segment metadata must be a JSON object")
+        segments.append(EmbedSegment(text=text, metadata=dict(meta or {})))
+    if not segments:
+        raise HTTPException(status_code=422, detail="segments must contain at least one non-empty text")
+    return segments
+
+
 class DocumentUpdateRequest(BaseModel):
     kind: str | None = None
     tags: list[str] | None = None
     effective_from: str | None = None
     effective_to: str | None = None
     title: str | None = Field(default=None, min_length=1, max_length=512)
+    attrs: dict[str, Any] | None = None
 
 
 class KnowledgeSearchRequest(BaseModel):
@@ -552,6 +598,10 @@ class EvidenceItem(BaseModel):
     score: float | None = None
     citable_as: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    attrs: dict[str, Any] | None = Field(
+        default=None,
+        description="Caller-defined fields from ingest (segments.metadata / document attrs); omitted when empty.",
+    )
 
 
 class EvidencePackResponse(BaseModel):
@@ -858,6 +908,7 @@ def doc_to_response(row: KnowledgeDocumentRow, *, created_by_name: str | None = 
         effective_to=_iso(row.effective_to),
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
+        attrs=dict(row.attrs or {}) if isinstance(getattr(row, "attrs", None), dict) else {},
     )
 
 
@@ -1370,10 +1421,19 @@ async def import_document(
     title: str | None = None,
     kind: str = "general",
     tags: list[str] | None = None,
+    attrs: dict[str, Any] | None = None,
+    segments: list[EmbedSegment] | None = None,
 ) -> DocumentImportResponse:
     from fastapi import HTTPException
 
-    checksum = hashlib.sha256(data).hexdigest()
+    if not data and not segments:
+        raise HTTPException(status_code=400, detail="file or segments required")
+
+    if segments:
+        payload = json.dumps([s.model_dump() for s in segments], ensure_ascii=False, sort_keys=True).encode("utf-8")
+        checksum = hashlib.sha256(payload).hexdigest()
+    else:
+        checksum = hashlib.sha256(data).hexdigest()
 
     async with session_factory() as session:
         space = await session.get(KnowledgeSpaceRow, space_id)
@@ -1432,17 +1492,19 @@ async def import_document(
         doc_id = str(uuid.uuid4())
         now = _now()
         default_title = Path(filename).stem.strip() or filename
+        doc_attrs = merge_custom_metadata({}, attrs)
         row = KnowledgeDocumentRow(
             id=doc_id,
             space_id=space_id,
             title=title or default_title,
             kind=kind or "general",
             tags=tag_list,
+            attrs=doc_attrs,
             status="processing",
             source_filename=filename,
             source_uri="",
             content_type=content_type or "application/octet-stream",
-            byte_size=len(data),
+            byte_size=len(data) if data else None,
             checksum_sha256=checksum,
             job_phase="queued",
             progress=0,
@@ -1463,7 +1525,16 @@ async def import_document(
         )
 
     # background ingest
-    asyncio.create_task(_run_ingest(session_factory, doc_id=doc_id, data=data, filename=filename))
+    segment_payload = [s.model_dump() for s in segments] if segments else None
+    asyncio.create_task(
+        _run_ingest(
+            session_factory,
+            doc_id=doc_id,
+            data=data,
+            filename=filename,
+            segments=segment_payload,
+        )
+    )
     return response
 
 
@@ -1488,7 +1559,14 @@ async def _parse_upload_bytes(data: bytes, filename: str) -> ParseResult:
     return await coro
 
 
-async def _run_ingest(session_factory: async_sessionmaker, *, doc_id: str, data: bytes, filename: str) -> None:
+async def _run_ingest(
+    session_factory: async_sessionmaker,
+    *,
+    doc_id: str,
+    data: bytes,
+    filename: str,
+    segments: list[dict[str, Any]] | None = None,
+) -> None:
     async with session_factory() as session:
         row = await session.get(KnowledgeDocumentRow, doc_id)
         if row is None:
@@ -1499,14 +1577,38 @@ async def _run_ingest(session_factory: async_sessionmaker, *, doc_id: str, data:
             row.updated_at = _now()
             await session.commit()
 
-            parsed = await _parse_upload_bytes(data, filename)
-            row.parse_quality = parsed.parse_quality
-            row.parse_error = parsed.error
-            if parsed.parse_quality == "failed" or not parsed.text.strip():
+            structured_docs = None
+            parsed_text = ""
+            parse_quality = "ok"
+            parse_error = None
+            if segments:
+                from llama_index.core import Document
+
+                structured_docs = [Document(text=str(seg.get("text") or "").strip(), metadata=dict(seg.get("metadata") or {})) for seg in segments if str(seg.get("text") or "").strip()]
+                parsed_text = "\n\n".join(str(seg.get("text") or "").strip() for seg in segments)
+            else:
+                parsed = await _parse_upload_bytes(data, filename)
+                parse_quality = parsed.parse_quality
+                parse_error = parsed.error
+                parsed_text = parsed.text
+                if parsed.parse_quality == "failed" or not parsed.text.strip():
+                    row.parse_quality = parsed.parse_quality
+                    row.parse_error = parsed.error
+                    row.status = "failed"
+                    row.job_phase = "failed"
+                    row.progress = 100
+                    row.error_message = parsed.error or "parse failed"
+                    row.updated_at = _now()
+                    await session.commit()
+                    return
+
+            row.parse_quality = parse_quality
+            row.parse_error = parse_error
+            if not parsed_text.strip():
                 row.status = "failed"
                 row.job_phase = "failed"
                 row.progress = 100
-                row.error_message = parsed.error or "parse failed"
+                row.error_message = parse_error or "empty content"
                 row.updated_at = _now()
                 await session.commit()
                 return
@@ -1518,6 +1620,7 @@ async def _run_ingest(session_factory: async_sessionmaker, *, doc_id: str, data:
 
             space = await session.get(KnowledgeSpaceRow, row.space_id)
             release = space_knowledge_version(space)
+            doc_attrs = dict(row.attrs or {}) if isinstance(row.attrs, dict) else {}
 
             await asyncio.to_thread(
                 ingest_document_text,
@@ -1526,12 +1629,14 @@ async def _run_ingest(session_factory: async_sessionmaker, *, doc_id: str, data:
                 title=row.title,
                 kind=row.kind,
                 sensitivity=row.sensitivity,
-                text=parsed.text,
-                parse_quality=parsed.parse_quality,
+                text=parsed_text,
+                parse_quality=parse_quality,
+                documents=structured_docs,
                 tags=list(row.tags or []),
                 release=release,
                 effective_from=row.effective_from,
                 effective_to=row.effective_to,
+                doc_attrs=doc_attrs,
             )
 
             row.status = "ready"
@@ -1601,6 +1706,7 @@ async def update_document(
     effective_from: str | None = None,
     effective_to: str | None = None,
     title: str | None = None,
+    attrs: dict[str, Any] | None = None,
 ) -> DocumentResponse:
     row = await session.get(KnowledgeDocumentRow, doc_id)
     if row is None or row.space_id != space_id:
@@ -1630,6 +1736,11 @@ async def update_document(
         row.effective_to = _parse_optional_iso_dt(effective_to)
         if row.effective_to is not None:
             meta_patch["effective_to"] = row.effective_to.isoformat()
+    if attrs is not None:
+        merged_attrs = dict(row.attrs or {}) if isinstance(row.attrs, dict) else {}
+        merged_attrs.update(merge_custom_metadata({}, attrs))
+        row.attrs = merged_attrs
+        meta_patch.update(merge_custom_metadata({}, attrs))
     row.updated_at = _now()
     await session.commit()
     await session.refresh(row)
@@ -1638,7 +1749,7 @@ async def update_document(
         meta_patch.setdefault("release", space_knowledge_version(space))
     if meta_patch:
         await asyncio.to_thread(
-            patch_document_metadata,
+            sync_document_metadata,
             space_id=space_id,
             doc_id=doc_id,
             patch=meta_patch,
@@ -1725,6 +1836,14 @@ def _evidence_dict_tags_match(
     return bool(parse_tags_value(list(row.tags or [])) & set(want))
 
 
+def _attach_user_attrs(items: list[EvidenceItem]) -> None:
+    from deerflow.knowledge.rag import user_attrs_from_metadata
+
+    for it in items:
+        attrs = user_attrs_from_metadata(it.metadata)
+        it.attrs = attrs or None
+
+
 def _enrich_evidence_items(
     items: list[EvidenceItem],
     *,
@@ -1749,10 +1868,10 @@ def _enrich_evidence_items(
         if row.effective_to is not None:
             it.metadata["effective_to"] = row.effective_to.isoformat()
         attrs = row.attrs if isinstance(row.attrs, dict) else {}
-        if attrs.get("article_no"):
-            it.metadata["article_no"] = attrs["article_no"]
-        if attrs.get("clause_id"):
-            it.metadata["clause_id"] = attrs["clause_id"]
+        for key, value in attrs.items():
+            if key.startswith("_"):
+                continue
+            it.metadata.setdefault(key, value)
         if not it.title:
             it.title = row.title
         if not it.citable_as:
@@ -1862,6 +1981,19 @@ async def search(
         merge_mode = str(scenario_cfg.merge_mode or "slot_then_rrf")
         merged_raw = merge_lane_hits(buckets, final_top_k=final_top_k, merge_mode=merge_mode)
         items = [EvidenceItem.model_validate(x) for x in merged_raw]
+        doc_ids = {str(it.metadata.get("doc_id")) for it in items if it.metadata.get("doc_id")}
+        doc_meta: dict[str, KnowledgeDocumentRow] = {}
+        if doc_ids:
+            rows = (await session.execute(select(KnowledgeDocumentRow).where(KnowledgeDocumentRow.id.in_(doc_ids)))).scalars().all()
+            doc_meta = {r.id: r for r in rows}
+        _enrich_evidence_items(
+            items,
+            pack_id=pack.id,
+            space_ids=space_ids,
+            lane_id=None,
+            doc_meta=doc_meta,
+        )
+        _attach_user_attrs(items)
         trace_id = next((lr.get("trace_id") for lr in lane_results if lr.get("trace_id")), trace_id)
         resolved_version = next(
             (str(lr.get("knowledge_version")) for lr in lane_results if lr.get("knowledge_version")),
@@ -1917,6 +2049,7 @@ async def search(
         lane_id=lane_id,
         doc_meta=doc_meta,
     )
+    _attach_user_attrs(items)
     if len(items) > final_top_k:
         items = items[:final_top_k]
     return EvidencePackResponse(knowledge_version=resolved_version, trace_id=trace_id, items=items)

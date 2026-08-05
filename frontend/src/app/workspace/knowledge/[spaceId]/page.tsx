@@ -55,7 +55,7 @@ import type { Translations } from "@/core/i18n/locales/types";
 import {
   deleteDocument,
   getSpace,
-  embedDocument,
+  importDocument,
   listCatalog,
   listDocumentChunks,
   listDocuments,
@@ -312,7 +312,7 @@ export default function KnowledgeSpaceDocumentsPage() {
     title?: string,
     signal?: AbortSignal,
   ) {
-    const embedded = await embedDocument(
+    const embedded = await importDocument(
       spaceId,
       file,
       { kind, title },

@@ -18,8 +18,8 @@
                ▼
 ┌─────────────────────────────────────┐
 │  DeerFlow Gateway                  │
-│  · POST /api/doc/parse             │
-│  · POST /api/knowledge/v1/…        │
+│  · POST /api/document/parse             │
+│  · POST /api/knowledge/…        │
 │    import（向量化）/ search（检索）  │
 └─────────────────────────────────────┘
 ```
@@ -39,7 +39,7 @@
 
 ```text
 1. 用户选 category(L1/L2/L3) + 行业 tags + 文件 [+ 可选覆盖 segment_prompt]
-2. Web → POST /api/doc/parse（**必带**法务 segment_prompt）→ 得 `data`、`meta`
+2. Web → POST /api/document/parse（**必带**法务 segment_prompt）→ 得 `data`、`meta`
 3. Web 从 `data` 写入 rule_spaces（draft）+ rule_details
 4. 跳转 /rules/{spaceId}：编辑主表 meta、预览/改明细
 5. 用户点「确认发布」→ Web BFF 调 DeerFlow knowledge **逐条 import 向量化**（§5）→ `status=active`
@@ -71,7 +71,7 @@
 |----|------|
 | embed 文本 | `space.title + chapter_path + segment_label + body`（Web 拼好写入 import 文件） |
 | 向量 metadata | 经 document `attrs` 同步到分片：`rule_space_id`, `detail_id`, `category`, `segment_label` |
-| 检索过滤 | `POST /api/knowledge/v1/search` + `spaces` + `tags` + `kinds`（§5.3） |
+| 检索过滤 | `POST /api/knowledge/search` + `spaces` + `tags` + `kinds`（§5.3） |
 | 鉴权 | BFF 持 `dfk_` 或用户 session；需 `knowledge:write`（import）、`knowledge:read`（search） |
 
 ### 2.4 引用解析 `resolve_refs`（Web/BFF）
@@ -96,7 +96,7 @@
 2. Web 可选：PRD 向量化（若 DeerFlow 提供 PRD search，或 Web 自管 PRD 索引）
 3. 按 PRD 行业 → Web `GET /tree/checkpoints?industry_tags=…` 得适用检查点
 4. 对每个检查点 / 每段 PRD：
-     · BFF 调 DeerFlow `POST /api/knowledge/v1/search`（§5.3）得 Evidence
+     · BFF 调 DeerFlow `POST /api/knowledge/search`（§5.3）得 Evidence
      · 从 Evidence.metadata.detail_id 查 rule_details + 检查点配置
 5. Web 算分：权重、一票否决、一级维度汇总
 6. 结论：同检查点多位置单独编号，满足与否综合判定；原文 offset 高亮在 Web 存/算
@@ -136,7 +136,7 @@
 浏览器 → Web BFF  POST /spaces（或 /spaces/upload）
            │
            ├─ 1. 组装 segment_prompt（§4.2）
-           ├─ 2. 转发 DeerFlow  POST /api/doc/parse（§4.3）
+           ├─ 2. 转发 DeerFlow  POST /api/document/parse（§4.3）
            ├─ 3. 校验 data，映射 rule_spaces + rule_details（§4.4）
            └─ 4. resolve_refs（§2.4）→ 返回 space_id
 ```
@@ -193,8 +193,8 @@
 
 | 项 | 值 |
 |----|-----|
-| 方法 / 路径 | **`POST /api/doc/parse`** |
-| Base URL | DeerFlow Gateway（经 Nginx 一般为 `{origin}/api/doc/parse`） |
+| 方法 / 路径 | **`POST /api/document/parse`** |
+| Base URL | DeerFlow Gateway（经 Nginx 一般为 `{origin}/api/document/parse`） |
 | Content-Type | `multipart/form-data` |
 | 鉴权 | 与 Gateway 一致（如 Bearer / Cookie）；规划同 input-polish：`runs:create` |
 
@@ -247,7 +247,7 @@ form.append("file", file);
 form.append("segment_prompt", resolveSegmentPrompt(userPromptOverride));
 if (outputSchema) form.append("output_schema", JSON.stringify(outputSchema));
 
-const res = await fetch(`${DEERFLOW_ORIGIN}/api/doc/parse`, {
+const res = await fetch(`${DEERFLOW_ORIGIN}/api/document/parse`, {
   method: "POST",
   headers: { Authorization: `Bearer ${token}` },
   body: form,
@@ -274,7 +274,7 @@ const { data, meta } = await res.json();
 | 层 | 路径 | 说明 |
 |----|------|------|
 | 前端 | `POST /spaces` 或 `POST /spaces/upload` | 带 file、category、tags；BFF 始终组装 `segment_prompt` |
-| BFF 内部 | `POST {DEERFLOW}/api/doc/parse` | §4.3 |
+| BFF 内部 | `POST {DEERFLOW}/api/document/parse` | §4.3 |
 | BFF 响应 | `{ space_id, detail_count, meta }` | 不暴露 DeerFlow 原始响应给前端（可选 `preview`） |
 
 ---
@@ -298,7 +298,7 @@ const { data, meta } = await res.json();
 
 | 项 | 值 |
 |----|-----|
-| 方法 / 路径 | **`POST /api/doc/embed/{space_id}`** |
+| 方法 / 路径 | **`POST /api/knowledge/spaces/{space_id}/documents`** |
 | `file` | UTF-8 文本字节（内容为 embed 文本，文件名如 `{detail_id}.txt`） |
 | `kind` | `legal-clause` |
 | `tags[]` | `rule_spaces.tags` + 可选 `category` slug |
@@ -308,7 +308,7 @@ import 同步完成解析+切块+**embed**（见 knowledge §5.1）。返回 `do
 
 | 步骤 | API |
 |------|-----|
-| 写入业务 attrs | **`PATCH /api/knowledge/v1/spaces/{space_id}/documents/{doc_id}`** → `attrs`: `{ "rule_space_id", "detail_id", "segment_label", "category" }` |
+| 写入业务 attrs | **`PATCH /api/knowledge/spaces/{space_id}/documents/{doc_id}`** → `attrs`: `{ "rule_space_id", "detail_id", "segment_label", "category" }` |
 | 回写 Web | `rule_details.attrs.knowledge_doc_id = doc_id` |
 
 `patch_document_metadata` 会把 `attrs` 同步到向量分片 metadata，供 search 带回 `detail_id`。
@@ -327,7 +327,7 @@ import 同步完成解析+切块+**embed**（见 knowledge §5.1）。返回 `do
 
 | 项 | 值 |
 |----|-----|
-| 方法 / 路径 | **`POST /api/knowledge/v1/search`** |
+| 方法 / 路径 | **`POST /api/knowledge/search`** |
 | 鉴权 | `knowledge:read` |
 
 **请求示例：**
@@ -365,7 +365,7 @@ BFF 对外仍可提供 **`POST /search`**（法务 BFF），内部转发上述 k
 ```text
 浏览器 → POST /spaces/{id}/confirm
   → BFF 读 rule_details[]
-  → 每条 POST /api/doc/embed/{ks}
+  → 每条 POST /api/knowledge/spaces/{ks}/documents
   → 每条 PATCH …/documents/{doc_id}（attrs.detail_id …）
   → 全部 OK → rule_spaces.status=active, embedded_at=now()
 ```
@@ -374,11 +374,11 @@ BFF 对外仍可提供 **`POST /search`**（法务 BFF），内部转发上述 k
 
 | 场景 | API |
 |------|-----|
-| 确认向量化 | `POST /api/doc/embed/{space_id}` |
+| 确认向量化 | `POST /api/knowledge/spaces/{space_id}/documents` |
 | 写向量 metadata | `PATCH …/documents/{doc_id}` |
 | 改条文 re-embed | `POST …/documents/{doc_id}/reindex` |
 | 废止删向量 | `DELETE …/documents/{doc_id}` |
-| 法规检索 | `POST /api/knowledge/v1/search` |
+| 法规检索 | `POST /api/knowledge/search` |
 
 ---
 
@@ -398,7 +398,7 @@ BFF 对外仍可提供 **`POST /search`**（法务 BFF），内部转发上述 k
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/search` | 转发 DeerFlow `POST /api/knowledge/v1/search`（§5.3） |
+| POST | `/search` | 转发 DeerFlow `POST /api/knowledge/search`（§5.3） |
 
 ### 6.3 规则树
 
