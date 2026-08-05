@@ -18,6 +18,10 @@ class DocParseMeta(BaseModel):
         description="Primary document parser: docling or markitdown (fallback)",
     )
     warnings: list[str] = Field(default_factory=list)
+    parse_ms: int | None = Field(default=None, description="Physical file → markdown time (ms)")
+    block_ms: int | None = Field(default=None, description="Markdown split + batch pack time (ms)")
+    llm_ms: int | None = Field(default=None, description="LLM batch calls + merge time (ms)")
+    total_ms: int | None = Field(default=None, description="End-to-end pipeline time (ms)")
 
 
 class DocParseResponse(BaseModel):

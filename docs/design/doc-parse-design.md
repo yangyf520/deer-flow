@@ -14,7 +14,7 @@ POST /api/document/parse（multipart: file + segment_prompt）
   → MarkdownNodeParser 分块；若仅 1 块 → ATX # 或行首 **bold** 标题切分
   → 打包 batch（字符预算由 parse 模型 ``config.models[*].max_tokens`` 推导；每批 ≤20 段）→ 并行 run_oneshot_llm（≤8 并发）
   → langchain parse_json_markdown → 数组合并
-  → chapter_path 修正 + 源文 body 回填（grounding 失败时按条号锚定）
+  → chapter_path 修正 + 源文 body 回填（grounding 失败时按 segment_prompt JSON 示例推断的 label/chapter 模式锚定）
   → 为每条 detail 分配 UUID ``row_no``
   → grounding + 质量 warnings
   → { data, meta }（不写库）
@@ -27,7 +27,7 @@ POST /api/document/parse（multipart: file + segment_prompt）
 | 步骤 | 说明 |
 |------|------|
 | 解析 | Docling 优先；不可用（缺 torch 等）→ MarkItDown |
-| 结构切分 | LlamaIndex `MarkdownNodeParser`；单块时 fallback：`^#{1,6}\s` 或行首 `**标题**` |
+| 结构切分 | LlamaIndex `MarkdownNodeParser`；单块时 fallback：`^#{1,6}\s`、行首 `**标题**`、或 segment_prompt JSON 示例中的 `segment_label` 模式 |
 | 超限块 | 单段超过字符预算 → 按 `\n\n` 段落边界硬切 |
 | LLM 批次 | 贪心打包：每批 ≤ ``max_tokens`` 推导字符预算且 ≤20 段 |
 
@@ -41,7 +41,7 @@ POST /api/document/parse（multipart: file + segment_prompt）
 
 - 空 `body`
 - 重复 `segment_label`
-- **grounding**：NFKC + 空白规范化后，`body`（或足够长前缀）须为源 Markdown 子串；否则 warning「possible paraphrase」。合并前会尝试按 `segment_label` 从源文回填未锚定的 `body`。
+- **grounding**：NFKC + 空白规范化后，`body`（或足够长前缀）须为源 Markdown 子串；否则 warning「possible paraphrase」。合并前会尝试按 prompt 示例推断的 `segment_label` 模式从源文回填未锚定的 `body`。
 - **`row_no`**：服务端为每条 detail 分配全局唯一 UUID；调用方预置的非空字符串 id 保留，整数或纯数字字符串（旧版行号）会被替换。
 
 ---

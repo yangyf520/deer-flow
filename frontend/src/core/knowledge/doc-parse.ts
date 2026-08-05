@@ -24,6 +24,10 @@ export type DocParseMeta = {
   parse_quality?: string | null;
   parse_backend?: string | null;
   warnings?: string[];
+  parse_ms?: number | null;
+  block_ms?: number | null;
+  llm_ms?: number | null;
+  total_ms?: number | null;
 };
 
 export type DocParseResponse = {

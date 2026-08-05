@@ -94,6 +94,7 @@ function NoticeBanner({ children }: { children: React.ReactNode }) {
 }
 
 const DOC_PAGE_SIZE = 20;
+const INGEST_POLL_MS = 3000;
 
 function statusVariant(
   status: string,
@@ -227,20 +228,45 @@ export default function KnowledgeSpaceDocumentsPage() {
 
   const hasMoreDocs = docs.length < docsTotal;
 
-  const reload = useCallback(async () => {
+  const hasProcessingDocs = useMemo(
+    () => docs.some((d) => d.status === "processing"),
+    [docs],
+  );
+
+  const loadSpace = useCallback(async () => {
     try {
-      const [s, d] = await Promise.all([
-        getSpace(spaceId),
-        listDocuments(spaceId, DOC_PAGE_SIZE, 0, undefined, docListFilters.q),
-      ]);
+      const s = await getSpace(spaceId);
       setSpace(s);
-      setDocs(d.items);
-      setDocsTotal(d.total);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [docListFilters, spaceId]);
+  }, [spaceId]);
+
+  const refreshDocuments = useCallback(async (): Promise<
+    KnowledgeDocument[]
+  > => {
+    try {
+      const d = await listDocuments(
+        spaceId,
+        DOC_PAGE_SIZE,
+        0,
+        undefined,
+        docListFilters.q,
+      );
+      setDocs(d.items);
+      setDocsTotal(d.total);
+      setError(null);
+      return d.items;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return [];
+    }
+  }, [docListFilters.q, spaceId]);
+
+  const reload = useCallback(async () => {
+    await Promise.all([loadSpace(), refreshDocuments()]);
+  }, [loadSpace, refreshDocuments]);
 
   const loadMoreDocs = useCallback(async () => {
     if (!hasMoreDocs || docsLoadingMore) return;
@@ -279,28 +305,27 @@ export default function KnowledgeSpaceDocumentsPage() {
   }, []);
 
   useEffect(() => {
-    void reload();
-    const timer = setInterval(() => void reload(), 3000);
+    void loadSpace();
+  }, [loadSpace]);
+
+  useEffect(() => {
+    void refreshDocuments();
+  }, [refreshDocuments]);
+
+  useEffect(() => {
+    if (busy || !hasProcessingDocs) return;
+    const timer = setInterval(() => void refreshDocuments(), INGEST_POLL_MS);
     return () => clearInterval(timer);
-  }, [reload]);
+  }, [busy, hasProcessingDocs, refreshDocuments]);
 
   async function waitForDocumentIngest(docId: string, signal?: AbortSignal) {
     const deadline = Date.now() + 120_000;
     while (Date.now() < deadline) {
       if (signal?.aborted) return;
-      await new Promise((r) => setTimeout(r, 1500));
-      if (signal?.aborted) return;
-      const d = await listDocuments(
-        spaceId,
-        DOC_PAGE_SIZE,
-        0,
-        undefined,
-        docListFilters.q,
-      );
-      setDocs(d.items);
-      setDocsTotal(d.total);
-      const row = d.items.find((x) => x.id === docId);
-      if (!row || row.status === "ready" || row.status === "failed") break;
+      const items = await refreshDocuments();
+      const row = items.find((x) => x.id === docId);
+      if (!row || row.status === "ready" || row.status === "failed") return;
+      await new Promise((r) => setTimeout(r, INGEST_POLL_MS));
     }
   }
 
@@ -337,10 +362,10 @@ export default function KnowledgeSpaceDocumentsPage() {
       }
       setNotice(embedded.message ?? t.knowledge.dedupedNotice);
       setError(null);
-      await reload();
+      await refreshDocuments();
       return embedded.doc_id;
     }
-    await reload();
+    await refreshDocuments();
     await waitForDocumentIngest(embedded.doc_id, signal);
     return embedded.doc_id;
   }
@@ -438,22 +463,7 @@ export default function KnowledgeSpaceDocumentsPage() {
       const prepared = await fileForIngest(file, ingestMode);
       await saveDocIngestMode(doc.id, ingestMode);
       await reindexDocument(spaceId, doc.id, prepared.file);
-      await reload();
-      const deadline = Date.now() + 120_000;
-      while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 1500));
-        const d = await listDocuments(
-          spaceId,
-          DOC_PAGE_SIZE,
-          0,
-          undefined,
-          docListFilters.q,
-        );
-        setDocs(d.items);
-        setDocsTotal(d.total);
-        const row = d.items.find((x) => x.id === doc.id);
-        if (!row || row.status === "ready" || row.status === "failed") break;
-      }
+      await waitForDocumentIngest(doc.id);
       if (ingestMode === "structured") {
         setNotice(t.knowledge.structuredReindexed);
       }

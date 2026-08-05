@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import logging
 import re
+import time
 import unicodedata
 import uuid
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from langchain_core.utils.json import parse_json_markdown
 from deerflow.config.app_config import AppConfig
 from deerflow.config.knowledge_config import get_knowledge_config
 from deerflow.doc_parse.contract import DocParseMeta, DocParseResponse
+from deerflow.doc_parse.prompt_hints import PromptHints, extract_prompt_hints
 from deerflow.models import create_chat_model
 from deerflow.utils.file_conversion import (
     ParseResult,
@@ -30,26 +32,20 @@ from deerflow.utils.oneshot_llm import run_oneshot_llm
 
 logger = logging.getLogger(__name__)
 
-# Batch sizing: derived from config.models[*].max_tokens at runtime (no knowledge.parse knobs).
-_DEFAULT_MAX_BLOCKS_PER_BATCH = 20
-_DEFAULT_MAX_CONCURRENT_BATCHES = 8
-_INPUT_CHARS_PER_TOKEN = 2
-_INPUT_TOKEN_FRACTION = 0.5  # reserve the other half for JSON output
-_FALLBACK_MAX_TOKENS = 8192
+# Batch sizing: input from context_window; batch count mainly capped by max_tokens (JSON output).
+_DEFAULT_CONTEXT_WINDOW = 128_000
+_PROMPT_OVERHEAD_TOKENS = 2048
+_CHARS_PER_TOKEN = 2
+_TOKENS_PER_DETAIL_EST = 400
 
-_BOLD_LABEL_MAX_LEN = 80
-_GROUNDING_MIN_BODY_LEN = 12
+_markdown_node_parser: Any | None = None
 
 _ATX_HEADING_RE = re.compile(r"(?=^#{1,6}\s)", re.MULTILINE)
 # MarkItDown / Word: **Heading** at line start (optionally followed by content on the same line).
 _BOLD_HEADING_RE = re.compile(
-    rf"(?=^\*\*[^*\n]{{1,{_BOLD_LABEL_MAX_LEN}}}\*\*(?:[\s\u3000]|$))",
+    r"(?=^\*\*[^*\n]{1,80}\*\*(?:[\s\u3000]|$))",
     re.MULTILINE,
 )
-_ARTICLE_LABEL_RE = re.compile(r"^第[0-9一二三四五六七八九十百千]+条$")
-_CHAPTER_HEADING_RE = re.compile(r"第[0-9一二三四五六七八九十百千]+章")
-_ARTICLE_MARKER_RE = re.compile(r"第[0-9一二三四五六七八九十百千]+条")
-_ENGLISH_CHAPTER_RE = re.compile(r"(?:Chapter|Part|Section)\s+\d", re.IGNORECASE)
 
 
 class DocParseError(Exception):
@@ -77,25 +73,79 @@ def _resolve_parse_model_name(*, app_config: AppConfig, model_name: str | None) 
     return "default"
 
 
-def _model_max_tokens(*, app_config: AppConfig, model_name: str) -> int:
-    get_model_config = getattr(app_config, "get_model_config", None)
-    model_cfg = get_model_config(model_name) if callable(get_model_config) else None
-    if model_cfg is not None:
-        raw = model_cfg.model_dump(exclude_none=True).get("max_tokens")
+def _int_from_model_config(model_cfg: Any, key: str) -> int | None:
+    raw = getattr(model_cfg, key, None)
+    if isinstance(raw, int) and raw > 0:
+        return raw
+    extra = getattr(model_cfg, "model_extra", None) or getattr(model_cfg, "__pydantic_extra__", None)
+    if isinstance(extra, dict):
+        raw = extra.get(key)
         if isinstance(raw, int) and raw > 0:
             return raw
-    return _FALLBACK_MAX_TOKENS
+    if hasattr(model_cfg, "model_dump"):
+        raw = model_cfg.model_dump(exclude_none=True).get(key)
+        if isinstance(raw, int) and raw > 0:
+            return raw
+    return None
+
+
+def _max_tokens_from_model_config(model_cfg: Any) -> int | None:
+    return _int_from_model_config(model_cfg, "max_tokens")
+
+
+def _context_window_from_model_config(model_cfg: Any) -> int | None:
+    return _int_from_model_config(model_cfg, "context_window")
+
+
+def _model_config_for_parse(*, app_config: AppConfig, model_name: str) -> Any | None:
+    get_model_config = getattr(app_config, "get_model_config", None)
+    if callable(get_model_config):
+        model_cfg = get_model_config(model_name)
+        if model_cfg is not None:
+            return model_cfg
+    for model in getattr(app_config, "models", None) or []:
+        if getattr(model, "name", None) == model_name:
+            return model
+    return None
+
+
+def _model_max_tokens(*, app_config: AppConfig, model_name: str) -> int:
+    model_cfg = _model_config_for_parse(app_config=app_config, model_name=model_name)
+    if model_cfg is not None:
+        found = _max_tokens_from_model_config(model_cfg)
+        if found is not None:
+            return found
+
+    for model in getattr(app_config, "models", None) or []:
+        found = _max_tokens_from_model_config(model)
+        if found is not None:
+            logger.warning(
+                "doc_parse: max_tokens missing for model %r; using %r (%s)",
+                model_name,
+                getattr(model, "name", model),
+                found,
+            )
+            return found
+
+    raise DocParseError(
+        f"cannot resolve max_tokens for parse model {model_name!r}; set max_tokens on config.models[]",
+        status_code=422,
+    )
 
 
 def resolve_parse_batch_limits(*, app_config: AppConfig, model_name: str | None = None) -> ParseBatchLimits:
-    """Batch sizing from the parse model's max_tokens (config.models slot)."""
+    """Input budget from context_window; batch count mainly from max_tokens (JSON output size)."""
     resolved_model = _resolve_parse_model_name(app_config=app_config, model_name=model_name)
+    model_cfg = _model_config_for_parse(app_config=app_config, model_name=resolved_model)
     max_tokens = _model_max_tokens(app_config=app_config, model_name=resolved_model)
-    max_chars = max(int(max_tokens * _INPUT_CHARS_PER_TOKEN * _INPUT_TOKEN_FRACTION), 256)
+    context_window = (_context_window_from_model_config(model_cfg) if model_cfg is not None else None) or _DEFAULT_CONTEXT_WINDOW
+    input_tokens = max(context_window - _PROMPT_OVERHEAD_TOKENS - max_tokens, 4096)
+    max_chars = input_tokens * _CHARS_PER_TOKEN
+    max_blocks = max(max_tokens // _TOKENS_PER_DETAIL_EST, 1)
     return ParseBatchLimits(
         max_chars=max_chars,
-        max_blocks=_DEFAULT_MAX_BLOCKS_PER_BATCH,
-        max_concurrent=_DEFAULT_MAX_CONCURRENT_BATCHES,
+        max_blocks=max_blocks,
+        max_concurrent=8,
     )
 
 
@@ -154,6 +204,14 @@ def _split_by_pattern(text: str, pattern: re.Pattern[str]) -> list[str]:
     return parts if len(parts) > 1 else [text.strip()]
 
 
+def _split_by_prompt_patterns(text: str, hints: PromptHints) -> list[str]:
+    for pattern in hints.split_patterns:
+        parts = _split_by_pattern(text, pattern)
+        if len(parts) > 1:
+            return parts
+    return [text.strip()]
+
+
 def _split_by_headings(text: str) -> list[str]:
     """Generic heading split: ATX # lines, then MarkItDown **bold** line-start headings."""
     for pattern in (_ATX_HEADING_RE, _BOLD_HEADING_RE):
@@ -161,6 +219,28 @@ def _split_by_headings(text: str) -> list[str]:
         if len(parts) > 1:
             return parts
     return [text.strip()]
+
+
+def _get_markdown_node_parser() -> Any:
+    global _markdown_node_parser
+    if _markdown_node_parser is None:
+        from llama_index.core.node_parser import MarkdownNodeParser
+
+        _markdown_node_parser = MarkdownNodeParser()
+    return _markdown_node_parser
+
+
+def _markdown_blocks_from_parser(text: str) -> list[str]:
+    from llama_index.core import Document
+
+    nodes = _get_markdown_node_parser().get_nodes_from_documents([Document(text=text)])
+    blocks: list[str] = []
+    for node in nodes:
+        body = (node.get_content() if hasattr(node, "get_content") else getattr(node, "text", "")) or ""
+        body = str(body).strip()
+        if body:
+            blocks.append(body)
+    return blocks or [text]
 
 
 def _chunk_text(text: str, *, max_chars: int) -> list[str]:
@@ -188,23 +268,16 @@ def _chunk_text(text: str, *, max_chars: int) -> list[str]:
     return chunks
 
 
-def _markdown_blocks(text: str) -> list[str]:
-    """Split markdown into sections (generic — no domain-specific rules)."""
+def _markdown_blocks(text: str, *, hints: PromptHints | None = None) -> list[str]:
+    """Split markdown into sections (patterns from segment_prompt when available)."""
     text = text.strip()
     if not text:
         return []
-    try:
-        from llama_index.core import Document
-        from llama_index.core.node_parser import MarkdownNodeParser
 
-        nodes = MarkdownNodeParser().get_nodes_from_documents([Document(text=text)])
-        blocks = []
-        for node in nodes:
-            body = (node.get_content() if hasattr(node, "get_content") else getattr(node, "text", "")) or ""
-            body = str(body).strip()
-            if body:
-                blocks.append(body)
-        blocks = blocks or [text]
+    hints = hints or PromptHints()
+
+    try:
+        blocks = _markdown_blocks_from_parser(text)
     except Exception as exc:
         logger.warning("MarkdownNodeParser failed; using whole document: %s", exc)
         blocks = [text]
@@ -213,6 +286,11 @@ def _markdown_blocks(text: str) -> list[str]:
         heading_blocks = _split_by_headings(blocks[0])
         if len(heading_blocks) > 1:
             blocks = heading_blocks
+        elif hints.split_patterns:
+            label_blocks = _split_by_prompt_patterns(blocks[0], hints)
+            if len(label_blocks) > 1:
+                blocks = label_blocks
+
     return blocks
 
 
@@ -263,8 +341,8 @@ def _body_grounded_in_source(body: str, source: str) -> bool:
     norm_source = _normalize_grounding_text(source)
     if norm_body in norm_source:
         return True
-    if len(norm_body) >= _GROUNDING_MIN_BODY_LEN:
-        prefix = norm_body[: max(_GROUNDING_MIN_BODY_LEN, len(norm_body) // 2)]
+    if len(norm_body) >= 12:
+        prefix = norm_body[: max(12, len(norm_body) // 2)]
         if prefix in norm_source:
             return True
     return False
@@ -293,8 +371,8 @@ def _match_candidates(body: str) -> list[str]:
         add(first_para)
     norm_body = _normalize_grounding_text(raw)
     add(norm_body)
-    if len(norm_body) >= _GROUNDING_MIN_BODY_LEN:
-        add(norm_body[: max(_GROUNDING_MIN_BODY_LEN, len(norm_body) // 2)])
+    if len(norm_body) >= 12:
+        add(norm_body[: max(12, len(norm_body) // 2)])
     return out
 
 
@@ -391,21 +469,18 @@ def _attach_row_no(data: Any, *, source_text: str = "") -> None:
         seen.add(row_id)
 
 
-def _is_article_label(text: str) -> bool:
-    return bool(_ARTICLE_LABEL_RE.match(text.strip()))
+def _detail_label(item: dict[str, Any], hints: PromptHints) -> str:
+    for key in (hints.label_field, "segment_label", "label"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
 
 
-def _looks_like_chapter_path(text: str) -> bool:
-    chapter = text.strip()
-    if not chapter or _is_article_label(chapter):
-        return False
-    if _CHAPTER_HEADING_RE.search(chapter):
-        return True
-    return _ENGLISH_CHAPTER_RE.search(chapter) is not None
-
-
-def _normalize_chapter_paths(data: dict[str, Any]) -> None:
+def _normalize_chapter_paths(data: dict[str, Any], *, hints: PromptHints) -> None:
     """Fill chapter_path from the nearest preceding chapter heading when LLM reused a label."""
+    if hints.chapter_pattern is None and hints.label_pattern is None:
+        return
     details = data.get("details")
     if not isinstance(details, list):
         return
@@ -413,22 +488,46 @@ def _normalize_chapter_paths(data: dict[str, Any]) -> None:
     for item in details:
         if not isinstance(item, dict):
             continue
-        chapter = str(item.get("chapter_path") or "").strip()
-        label = str(item.get("segment_label") or item.get("label") or "").strip()
-        if chapter and _looks_like_chapter_path(chapter) and chapter != label:
+        chapter = str(item.get(hints.chapter_field) or item.get("chapter_path") or "").strip()
+        label = _detail_label(item, hints)
+        if chapter and hints.looks_like_chapter(chapter, label=label):
             current_chapter = chapter
             continue
-        if current_chapter and (not chapter or chapter == label or _is_article_label(chapter)):
-            item["chapter_path"] = current_chapter
+        if current_chapter and (not chapter or chapter == label or hints.matches_label(chapter)):
+            item[hints.chapter_field] = current_chapter
+            if hints.chapter_field != "chapter_path" and "chapter_path" in item:
+                item["chapter_path"] = current_chapter
 
 
-def _repair_body_from_source(*, label: str, body: str, source_text: str) -> str | None:
+def _next_label_boundary(tail: str, *, label: str, hints: PromptHints, known_labels: list[str]) -> int | None:
+    positions: list[int] = []
+    for candidate in known_labels:
+        if candidate != label:
+            idx = tail.find(candidate)
+            if idx > 0:
+                positions.append(idx)
+    if hints.label_pattern is not None:
+        for match in hints.label_pattern.finditer(tail):
+            if match.start() > 0:
+                positions.append(match.start())
+    return min(positions) if positions else None
+
+
+def _repair_body_from_source(
+    *,
+    label: str,
+    body: str,
+    source_text: str,
+    hints: PromptHints,
+    known_labels: list[str] | None = None,
+) -> str | None:
     """Recover verbatim body text from source when the model paraphrased."""
     if _body_grounded_in_source(body, source_text):
         return body
     label = label.strip()
     if not label:
         return None
+    labels = known_labels or []
     pos = 0
     while True:
         idx = source_text.find(label, pos)
@@ -439,31 +538,39 @@ def _repair_body_from_source(*, label: str, body: str, source_text: str) -> str 
         if not tail:
             pos = idx + 1
             continue
-        next_article = _ARTICLE_MARKER_RE.search(tail)
-        if next_article is not None:
-            if next_article.start() == 0:
-                pos = idx + 1
-                continue
-            extracted = tail[: next_article.start()].strip()
-        else:
-            extracted = tail.strip()
+        boundary = _next_label_boundary(tail, label=label, hints=hints, known_labels=labels)
+        if boundary is not None and boundary == 0:
+            pos = idx + 1
+            continue
+        extracted = tail[:boundary].strip() if boundary is not None else tail.strip()
         if extracted and _body_grounded_in_source(extracted, source_text):
             return extracted
         pos = idx + 1
 
 
-def _repair_details_from_source(data: dict[str, Any], *, source_text: str) -> None:
+def _repair_details_from_source(data: dict[str, Any], *, source_text: str, hints: PromptHints) -> None:
     details = data.get("details")
     if not isinstance(details, list) or not source_text.strip():
         return
+    if hints.label_pattern is None:
+        return
+    known_labels = [_detail_label(item, hints) for item in details if isinstance(item, dict)]
+    known_labels = [value for value in known_labels if value]
     for item in details:
         if not isinstance(item, dict):
             continue
-        body = str(item.get("body") or "")
-        label = str(item.get("segment_label") or item.get("label") or "")
-        repaired = _repair_body_from_source(label=label, body=body, source_text=source_text)
+        body = str(item.get(hints.body_field) or item.get("body") or "")
+        label = _detail_label(item, hints)
+        repaired = _repair_body_from_source(
+            label=label,
+            body=body,
+            source_text=source_text,
+            hints=hints,
+            known_labels=known_labels,
+        )
         if repaired is not None:
-            item["body"] = repaired
+            key = hints.body_field if hints.body_field in item else "body"
+            item[key] = repaired
 
 
 def _collect_warnings(data: Any, *, source_text: str = "") -> list[str]:
@@ -555,19 +662,68 @@ async def parse_document(
     app_config: AppConfig,
     model_name: str | None = None,
 ) -> DocParseResponse:
+    parse_cfg = get_knowledge_config().parse
+    timeout = parse_cfg.timeout_seconds
+    started = time.perf_counter()
+    try:
+        if timeout and timeout > 0:
+            return await asyncio.wait_for(
+                _parse_document_body(
+                    data=data,
+                    filename=filename,
+                    segment_prompt=segment_prompt,
+                    output_schema=output_schema,
+                    app_config=app_config,
+                    model_name=model_name,
+                    started=started,
+                ),
+                timeout=timeout,
+            )
+        return await _parse_document_body(
+            data=data,
+            filename=filename,
+            segment_prompt=segment_prompt,
+            output_schema=output_schema,
+            app_config=app_config,
+            model_name=model_name,
+            started=started,
+        )
+    except TimeoutError as exc:
+        elapsed = int((time.perf_counter() - started) * 1000)
+        raise DocParseError(
+            f"document parse timed out after {timeout}s ({elapsed}ms elapsed)",
+            status_code=504,
+        ) from exc
+
+
+async def _parse_document_body(
+    *,
+    data: bytes,
+    filename: str,
+    segment_prompt: str,
+    output_schema: dict[str, Any] | None,
+    app_config: AppConfig,
+    model_name: str | None,
+    started: float,
+) -> DocParseResponse:
     prompt = segment_prompt.strip()
     if not prompt:
         raise DocParseError("segment_prompt is required")
 
+    hints = extract_prompt_hints(prompt)
+
     source_filename = Path(filename).name or "document.bin"
+    t0 = time.perf_counter()
     parsed, parse_backend = await asyncio.to_thread(_to_markdown, data, source_filename)
+    t_parse = time.perf_counter()
     source_text = parsed.text or ""
     if parsed.parse_quality == "failed" or not source_text.strip():
         raise DocParseError(parsed.error or "document parse failed")
 
-    blocks = _markdown_blocks(source_text)
+    blocks = _markdown_blocks(source_text, hints=hints)
     batch_limits = resolve_parse_batch_limits(app_config=app_config, model_name=model_name)
     batches = _batches(blocks, max_chars=batch_limits.max_chars, max_blocks=batch_limits.max_blocks)
+    t_blocks = time.perf_counter()
     if not batches:
         raise DocParseError("document produced no text blocks")
 
@@ -588,18 +744,35 @@ async def parse_document(
             for index, chunk in enumerate(batches)
         ]
     )
+    t_llm = time.perf_counter()
 
     merged = _merge_all(list(batch_results))
     if output_schema:
         _validate_schema(merged, output_schema)
     if isinstance(merged, dict):
-        _normalize_chapter_paths(merged)
-        _repair_details_from_source(merged, source_text=source_text)
+        _normalize_chapter_paths(merged, hints=hints)
+        _repair_details_from_source(merged, source_text=source_text, hints=hints)
     _attach_row_no(merged, source_text=source_text)
 
     warnings = _collect_warnings(merged, source_text=source_text)
     if warnings:
         logger.info("doc_parse quality warnings for %s: %s", source_filename, warnings)
+
+    parse_ms = int((t_parse - t0) * 1000)
+    block_ms = int((t_blocks - t_parse) * 1000)
+    llm_ms = int((t_llm - t_blocks) * 1000)
+    total_ms = int((t_llm - started) * 1000)
+    logger.info(
+        "doc_parse %s: backend=%s blocks=%s batches=%s parse_ms=%s block_ms=%s llm_ms=%s total_ms=%s",
+        source_filename,
+        parse_backend,
+        len(blocks),
+        total,
+        parse_ms,
+        block_ms,
+        llm_ms,
+        total_ms,
+    )
 
     return DocParseResponse(
         data=merged,
@@ -611,5 +784,9 @@ async def parse_document(
             parse_quality=parsed.parse_quality,
             parse_backend=parse_backend,
             warnings=warnings,
+            parse_ms=parse_ms,
+            block_ms=block_ms,
+            llm_ms=llm_ms,
+            total_ms=total_ms,
         ),
     )
