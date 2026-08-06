@@ -20,13 +20,25 @@ from deerflow.policy_review.contract import (
 from deerflow.policy_review.render import render_report
 from deerflow.policy_review.validate import allowed_ids_from_packs, iter_findings, validate_review
 
-# Keep queries short for speed; section title carries primary signal.
-SECTION_BODY_CHARS = 800
+# Section title carries primary signal; body budget must cover mid-document PRD clauses.
+SECTION_BODY_CHARS = 2000
 DEFAULT_RETRIEVE_CONCURRENCY = 8
 DEFAULT_SCENARIO = "policy-review"
+DEFAULT_POLICY_REVIEW_TOP_K = 20
+ANCHOR_TOP_K_PER_DOC = 5
 MAX_REVIEW_SECTIONS = 16
-DIGEST_ITEMS_PER_SECTION = 4
+DIGEST_ITEMS_PER_SECTION = 8
 DIGEST_SNIPPET_CHARS = 200
+MARKDOWN_HASH_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
+MARKDOWN_BOLD_HEADING_RE = re.compile(r"^\*\*(.+?)\*\*\s*$")
+SECTION_HEADING_RE = re.compile(
+    r"^("
+    r"[一二三四五六七八九十百]+、|"  # 一、产品背景
+    r"第[一二三四五六七八九十百\d]+[章节部分]|"
+    r"\d+(?:\.\d+)*[\.\、\s]|"  # 1.1 / 3.2.a
+    r"§[\d\.]+"
+    r")"
+)
 QUOTE_MIN = 8
 QUOTE_MAX = 180
 QUOTE_POOL_CAP = 8
@@ -41,6 +53,61 @@ class ValidationOutcome:
 
 
 # ── prepare ─────────────────────────────────────────────────────────────────
+
+
+def resolve_policy_review_top_k(top_k: int | None) -> int:
+    """Default policy-review breadth when callers omit ``top_k``."""
+    if top_k is not None:
+        return max(1, min(int(top_k), 50))
+    try:
+        from deerflow.config.knowledge_config import get_knowledge_config
+
+        cfg_top_k = int(get_knowledge_config().retrieval.top_k or 8)
+    except Exception:
+        cfg_top_k = 8
+    return max(DEFAULT_POLICY_REVIEW_TOP_K, cfg_top_k)
+
+
+def looks_like_section_heading(title: str) -> bool:
+    text = (title or "").strip()
+    if not text or len(text) > 80:
+        return False
+    if SECTION_HEADING_RE.search(text):
+        return True
+    markers = ("Non-Goals", "规划", "设计", "需求", "说明", "声明", "研判", "预案", "方案")
+    return len(text) <= 40 and any(marker in text for marker in markers)
+
+
+def split_markdown_into_sections(text: str) -> list[dict[str, str]]:
+    """Split MarkItDown-style bold headings when ``MarkdownNodeParser`` yields one blob."""
+    lines = (text or "").splitlines()
+    sections: list[dict[str, str]] = []
+    current_title = "document"
+    current_lines: list[str] = []
+
+    def flush() -> None:
+        body = "\n".join(current_lines).strip()
+        if body:
+            sections.append({"title": current_title, "body": body})
+
+    for line in lines:
+        hash_match = MARKDOWN_HASH_HEADING_RE.match(line)
+        bold_match = MARKDOWN_BOLD_HEADING_RE.match(line)
+        if hash_match:
+            flush()
+            current_title = hash_match.group(2).strip() or current_title
+            current_lines = []
+            continue
+        if bold_match:
+            title = bold_match.group(1).strip()
+            if looks_like_section_heading(title):
+                flush()
+                current_title = title
+                current_lines = []
+                continue
+        current_lines.append(line)
+    flush()
+    return sections
 
 
 def section_title(node: Any, index: int) -> str:
@@ -89,6 +156,18 @@ def prepare_sections(path: Path | str, *, title: str | None = None) -> dict[str,
             )
     if not sections:
         sections = [{"id": "section-1", "title": "document", "level": 1, "body": parsed.text.strip()}]
+    elif len(sections) == 1 and len(parsed.text or "") > 1500:
+        fallback = split_markdown_into_sections(parsed.text)
+        if len(fallback) > 1:
+            sections = [
+                {
+                    "id": f"section-{index + 1}",
+                    "title": chunk["title"],
+                    "level": 1,
+                    "body": chunk["body"],
+                }
+                for index, chunk in enumerate(fallback)
+            ]
 
     raw_section_count = len(sections)
     sections = merge_sections(sections)
@@ -443,6 +522,89 @@ def assemble_draft(session: dict[str, Any], draft: dict[str, Any]) -> dict[str, 
     return assembled
 
 
+def doc_ids_from_packs(packs: list[dict[str, Any]]) -> set[str]:
+    covered: set[str] = set()
+    for pack in packs:
+        items = pack.get("items") if isinstance(pack, dict) else None
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            doc_id = meta.get("doc_id") or item.get("doc_id")
+            if isinstance(doc_id, str) and doc_id.strip():
+                covered.add(doc_id.strip())
+    return covered
+
+
+async def supplement_missing_space_documents(
+    *,
+    session_factory: Callable[[], Any],
+    user_id: str,
+    system_role: str,
+    spaces: list[str] | None,
+    scenario: str,
+    top_k_per_doc: int,
+    packs: list[dict[str, Any]],
+    section_results: list[dict[str, Any]],
+    sem: asyncio.Semaphore,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Ensure every ready document in bound spaces contributes at least one evidence hit."""
+    from sqlalchemy import select
+
+    from deerflow.knowledge.service import resolve_agent_knowledge_scope, search
+    from deerflow.persistence.knowledge.model import KnowledgeDocumentRow
+
+    bound_spaces, _ = resolve_agent_knowledge_scope(spaces, scenario)
+    if not bound_spaces:
+        return packs, section_results
+
+    covered_doc_ids = doc_ids_from_packs(packs)
+    async with session_factory() as session:
+        result = await session.execute(
+            select(KnowledgeDocumentRow).where(
+                KnowledgeDocumentRow.space_id.in_(bound_spaces),
+                KnowledgeDocumentRow.status == "ready",
+            )
+        )
+        ready_docs = list(result.scalars().all())
+
+    missing_docs = [doc for doc in ready_docs if doc.id not in covered_doc_ids]
+    if not missing_docs:
+        return packs, section_results
+
+    async def one_doc(doc: KnowledgeDocumentRow) -> dict[str, Any]:
+        query = str(doc.title or doc.source_filename or doc.id).strip()
+        if not query:
+            return empty_section_pack(section_id=f"anchor-{doc.id[:8]}", query="")
+        async with sem:
+            async with session_factory() as active_session:
+                pack = await search(
+                    active_session,
+                    user_id=user_id,
+                    system_role=system_role,
+                    query=query,
+                    spaces=bound_spaces,
+                    top_k=top_k_per_doc,
+                    scenario=scenario,
+                )
+        dump = pack.model_dump() if hasattr(pack, "model_dump") else dict(pack)
+        items = dump.get("items") or []
+        meta = dump.get("metadata") if isinstance(dump.get("metadata"), dict) else {}
+        return {
+            "section_id": f"anchor-{doc.id[:8]}",
+            "query": query[:200],
+            "hit_count": len(items),
+            "pack": dump,
+            "space_results": list(meta.get("space_results") or []),
+        }
+
+    extras = await asyncio.gather(*[one_doc(doc) for doc in missing_docs])
+    extra_packs = [row["pack"] for row in extras if isinstance(row.get("pack"), dict)]
+    return packs + extra_packs, section_results + list(extras)
+
+
 async def retrieve_for_sections(
     session: Any | None = None,
     *,
@@ -462,6 +624,7 @@ async def retrieve_for_sections(
     if session is None and session_factory is None:
         raise ValueError("session or session_factory is required")
     scenario_id = scenario or DEFAULT_SCENARIO
+    effective_top_k = resolve_policy_review_top_k(top_k)
     if not sections:
         empty_scaffold = build_draft_scaffold([], allowed_ids=[], retrieval_empty=True)
         return {
@@ -496,7 +659,7 @@ async def retrieve_for_sections(
                     system_role=system_role,
                     query=query,
                     spaces=spaces,
-                    top_k=top_k,
+                    top_k=effective_top_k,
                     scenario=scenario_id,
                     as_of_date=as_of_date,
                 )
@@ -519,6 +682,18 @@ async def retrieve_for_sections(
 
     section_results = await asyncio.gather(*[one_section(i, s) for i, s in enumerate(sections) if isinstance(s, dict)])
     packs = [r["pack"] for r in section_results]
+    if session_factory is not None:
+        packs, section_results = await supplement_missing_space_documents(
+            session_factory=session_factory,
+            user_id=user_id,
+            system_role=system_role,
+            spaces=spaces,
+            scenario=scenario_id,
+            top_k_per_doc=ANCHOR_TOP_K_PER_DOC,
+            packs=packs,
+            section_results=list(section_results),
+            sem=sem,
+        )
     allowed = sorted(allowed_ids_from_packs(packs))
     retrieval_empty = len(allowed) == 0
     spaces_queried = spaces_from_packs(packs)

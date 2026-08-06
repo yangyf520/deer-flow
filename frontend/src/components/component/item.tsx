@@ -331,7 +331,11 @@ export function ItemCard({
   description?: ReactNode;
   badges?: ReactNode;
   metaTags?: ReactNode[];
-  metaTagsLayout?: "inline" | "inline-nowrap" | "stacked";
+  metaTagsLayout?:
+    | "inline"
+    | "inline-nowrap"
+    | "inline-grow-leading"
+    | "stacked";
   actions?: ReactNode;
   className?: string;
 }) {
@@ -370,11 +374,12 @@ export function ItemCard({
         <div className="mt-auto flex flex-col gap-2 pt-2">
           <ul
             className={cn(
-              "flex gap-1.5",
+              "flex",
               metaTagsLayout === "stacked"
-                ? "flex-col"
-                : metaTagsLayout === "inline-nowrap"
-                  ? "min-h-[1.625rem] flex-nowrap"
+                ? "flex-col gap-1.5"
+                : metaTagsLayout === "inline-nowrap" ||
+                    metaTagsLayout === "inline-grow-leading"
+                  ? "min-h-[1.625rem] flex-nowrap gap-1"
                   : "min-h-[1.625rem] flex-wrap gap-1",
             )}
           >
@@ -386,6 +391,10 @@ export function ItemCard({
                   metaTagsLayout === "stacked" && "w-full",
                   metaTagsLayout === "inline-nowrap" &&
                     "w-[calc((100%-0.375rem)/2)] flex-none shrink-0",
+                  metaTagsLayout === "inline-grow-leading" &&
+                    (i < metaTags!.length - 1
+                      ? "min-w-0 shrink overflow-hidden"
+                      : "flex-none shrink-0"),
                 )}
               >
                 {item}

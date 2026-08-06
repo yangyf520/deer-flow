@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,13 +13,18 @@ import pytest
 from deerflow.policy_review.pipeline import (
     build_draft_scaffold,
     build_evidence_digest,
+    doc_ids_from_packs,
     empty_section_pack,
     extract_quote_candidates,
     finalize_review,
+    looks_like_section_heading,
     merge_sections,
     prepare_sections,
+    resolve_policy_review_top_k,
     retrieve_for_sections,
     section_query,
+    split_markdown_into_sections,
+    supplement_missing_space_documents,
 )
 from deerflow.policy_review.validate import validate_review
 
@@ -28,6 +34,123 @@ def test_section_query_accepts_section_results_shape():
     assert section_query({"section_id": "section-1", "query": "密钥管理\n范围"}) == "密钥管理\n范围"
     assert section_query({"id": "s1", "title": "范围", "body": "正文"}) == "范围\n正文"
     assert section_query({}) == ""
+
+
+def test_prepare_sections_splits_bold_headings_when_single_blob(tmp_path, monkeypatch):
+    from deerflow.utils.file_conversion import ParseResult
+
+    doc = tmp_path / "prd.docx"
+    doc.write_bytes(b"fake-docx")
+    long_body = "正文段落。" * 400
+    markdown = f"**一、产品背景**\n\n{long_body}\n\n**二、功能需求**\n\n系统应支持算法备案与安全评估。\n\n**三、合规声明**\n\n应提供投诉举报入口。\n"
+    monkeypatch.setattr(
+        "deerflow.utils.file_conversion.parse_file_bytes_with_fallback",
+        lambda _data, _name: (ParseResult(text=markdown, parse_quality="ok"), "markitdown"),
+    )
+
+    out = prepare_sections(doc, title="PRD")
+
+    assert out["parse_backend"] == "markitdown"
+    assert out["section_count"] >= 3
+    titles = [section["title"] for section in out["sections"]]
+    assert any("产品背景" in title for title in titles)
+    assert any("功能需求" in title for title in titles)
+
+
+def test_split_markdown_into_sections_recognizes_bold_headings():
+    text = "**一、背景**\n\n第一段。\n\n**1.1 范围**\n\n第二段。\n\n**普通加粗不是标题**\n\n第三段。\n"
+    sections = split_markdown_into_sections(text)
+    assert len(sections) == 2
+    assert sections[0]["title"] == "一、背景"
+    assert sections[1]["title"] == "1.1 范围"
+    assert "普通加粗不是标题" in sections[1]["body"]
+
+
+def test_looks_like_section_heading():
+    assert looks_like_section_heading("一、产品背景")
+    assert looks_like_section_heading("1.1 范围说明")
+    assert not looks_like_section_heading("这是一段很长的正文标题不应该被识别为章节标题因为实在太长了")
+
+
+def test_resolve_policy_review_top_k_prefers_broad_default():
+    assert resolve_policy_review_top_k(None) >= 20
+    assert resolve_policy_review_top_k(12) == 12
+    assert resolve_policy_review_top_k(100) == 50
+
+
+def test_doc_ids_from_packs():
+    packs = [
+        {
+            "items": [
+                {"id": "a", "metadata": {"doc_id": "doc-a"}},
+                {"id": "b", "doc_id": "doc-b"},
+            ]
+        }
+    ]
+    assert doc_ids_from_packs(packs) == {"doc-a", "doc-b"}
+
+
+@pytest.mark.asyncio
+async def test_supplement_missing_space_documents_adds_anchor_queries():
+    doc_a = SimpleNamespace(id="doc-a", title="生成式人工智能服务管理暂行办法", source_filename="a.pdf")
+    doc_b = SimpleNamespace(id="doc-b", title="中华人民共和国个人信息保护法", source_filename="b.pdf")
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def execute(self, _stmt):
+            result = MagicMock()
+            result.scalars.return_value.all.return_value = [doc_a, doc_b]
+            return result
+
+    packs = [
+        {
+            "items": [
+                {
+                    "id": "ev-1",
+                    "metadata": {"doc_id": "doc-a"},
+                }
+            ]
+        }
+    ]
+    search = AsyncMock(
+        side_effect=[
+            SimpleNamespace(
+                model_dump=lambda: {
+                    "items": [{"id": "ev-2", "metadata": {"doc_id": "doc-b"}}],
+                    "metadata": {"space_results": []},
+                }
+            ),
+        ]
+    )
+
+    with (
+        patch(
+            "deerflow.knowledge.service.resolve_agent_knowledge_scope",
+            return_value=(["sense-ri-legal"], "policy-review"),
+        ),
+        patch("deerflow.knowledge.service.search", search),
+    ):
+        new_packs, section_results = await supplement_missing_space_documents(
+            session_factory=lambda: _Session(),
+            user_id="u1",
+            system_role="user",
+            spaces=["sense-ri-legal"],
+            scenario="policy-review",
+            top_k_per_doc=5,
+            packs=list(packs),
+            section_results=[],
+            sem=asyncio.Semaphore(2),
+        )
+
+    assert len(new_packs) == 2
+    assert len(section_results) == 1
+    assert section_results[0]["section_id"].startswith("anchor-")
+    search.assert_awaited_once()
 
 
 def test_prepare_sections_falls_back_when_docling_unavailable(tmp_path, monkeypatch):

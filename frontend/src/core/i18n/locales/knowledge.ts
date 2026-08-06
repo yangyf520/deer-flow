@@ -68,6 +68,7 @@ export type KnowledgeTranslations = {
   selectAllowedKinds: string;
   bindScenario: string;
   unbound: string;
+  noAgentsUsing: string;
   documents: string;
   eval: string;
   grants: string;
@@ -259,6 +260,7 @@ export const knowledgeEnUS: KnowledgeTranslations = {
   selectAllowedKinds: "Select kind",
   bindScenario: "Bind scenario",
   unbound: "Unbound",
+  noAgentsUsing: "No agents",
   documents: "Documents",
   eval: "Eval",
   grants: "Grants",
@@ -501,6 +503,7 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   selectAllowedKinds: "选择类型",
   bindScenario: "绑定场景",
   unbound: "未绑定",
+  noAgentsUsing: "暂无智能体使用",
   documents: "文档",
   eval: "评测",
   grants: "授权",

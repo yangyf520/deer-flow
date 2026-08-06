@@ -196,18 +196,18 @@ knowledge:
     hybrid: true
     bm25: true
     bm25_tokenizer: jieba
-    fusion_num_queries: 3
+    fusion_num_queries: 1
     rerank: true
     rerank_use: llama_index.postprocessor.dashscope_rerank:DashScopeRerank
     rerank_model: $RERANK_MODEL
     rerank_api_key: $RERANK_API_KEY
     parent_expand: true
     retrieve_n: 40
-    top_k: 8
+    top_k: 20
     score: 0.35
     snippet_max_chars: 1200
     query_llm:
-      enabled: true
+      enabled: false
       use: llama_index.llms.openai:OpenAI
       model: $CHAT_MODEL
       api_key: $CHAT_API_KEY

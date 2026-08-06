@@ -9,18 +9,12 @@ import {
 } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 
-import {
-  CardAction,
-  ItemCard,
-  ItemRowStatusBadge,
-  MetaPill,
-} from "@/components/component";
+import { CardAction, ItemCard, MetaPill } from "@/components/component";
+import { formatAgentUsageLabel } from "@/core/agents/knowledge-space-usage";
 import { useI18n } from "@/core/i18n/hooks";
 import {
   accessHint,
   accessLabel,
-  boundScenarioType,
-  scenarioLabel,
   spaceCardSubtitle,
   spaceCardTitle,
   type Space,
@@ -30,16 +24,21 @@ import { cn } from "@/lib/utils";
 interface SpaceCardProps {
   space: Space;
   onEdit?: (space: Space) => void;
+  /** Agent names bound to this space; `null` when agents API is off or still loading. */
+  usingAgentNames?: string[] | null;
 }
 
 const actionClass =
   "min-w-0 w-full justify-center px-1 text-[11px] sm:px-1.5 sm:text-xs";
 
-export function SpaceCard({ space, onEdit }: SpaceCardProps) {
+export function SpaceCard({
+  space,
+  onEdit,
+  usingAgentNames = null,
+}: SpaceCardProps) {
   const { t } = useI18n();
   const kb = t.knowledge;
   const href = `/workspace/knowledge/${space.id}`;
-  const bound = boundScenarioType(space);
   const isAdmin = space.my_role === "admin";
   const title = spaceCardTitle(space);
   const subtitle = spaceCardSubtitle(space, title);
@@ -47,22 +46,18 @@ export function SpaceCard({ space, onEdit }: SpaceCardProps) {
   const metaTags = useMemo(() => {
     const tags: ReactNode[] = [];
 
-    if (!bound) {
+    if (usingAgentNames && usingAgentNames.length > 0) {
+      const label = formatAgentUsageLabel(usingAgentNames);
       tags.push(
-        <ItemRowStatusBadge key="bind" tone="warning">
-          {kb.unbound}
-        </ItemRowStatusBadge>,
-      );
-    } else {
-      tags.push(
-        <ItemRowStatusBadge
-          key="scenario"
-          tone="success"
-          className="font-mono"
-          title={bound}
+        <MetaPill
+          key="agents"
+          mono
+          size="row"
+          hint={label}
+          className="max-w-full min-w-0 shrink truncate"
         >
-          {scenarioLabel(bound, kb)}
-        </ItemRowStatusBadge>,
+          {label}
+        </MetaPill>,
       );
     }
 
@@ -75,7 +70,7 @@ export function SpaceCard({ space, onEdit }: SpaceCardProps) {
     );
 
     return tags;
-  }, [bound, kb, space.access]);
+  }, [kb, space.access, usingAgentNames]);
 
   return (
     <ItemCard
@@ -84,6 +79,7 @@ export function SpaceCard({ space, onEdit }: SpaceCardProps) {
       title={title}
       description={subtitle}
       metaTags={metaTags}
+      metaTagsLayout="inline-grow-leading"
       href={href}
       actions={
         <div

@@ -21,6 +21,11 @@ import {
   SpaceCreateDialog,
   SpaceEditDialog,
 } from "@/components/workspace/knowledge";
+import {
+  knowledgeSpaceAgentUsageMap,
+  useAgents,
+  useAgentsApiEnabled,
+} from "@/core/agents";
 import { useI18n } from "@/core/i18n/hooks";
 import {
   createSpace,
@@ -37,6 +42,8 @@ import { cn } from "@/lib/utils";
 
 export default function KnowledgeSpacesPage() {
   const { t } = useI18n();
+  const { enabled: agentsApiEnabled } = useAgentsApiEnabled();
+  const { agents, isLoading: agentsLoading } = useAgents();
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [spaceId, setSpaceId] = useState("");
@@ -74,6 +81,13 @@ export default function KnowledgeSpacesPage() {
       return t.knowledge.countFiltered(filteredSpaces.length, spaces.length);
     return t.knowledge.countTotal(spaces.length);
   }, [filteredSpaces.length, q, spaces.length, t.knowledge]);
+
+  const spaceAgentUsage = useMemo(
+    () => knowledgeSpaceAgentUsageMap(agents),
+    [agents],
+  );
+
+  const agentUsageKnown = agentsApiEnabled && !agentsLoading;
 
   const reload = useCallback(async () => {
     try {
@@ -223,7 +237,14 @@ export default function KnowledgeSpacesPage() {
             <div className={cn(workspacePageInsetXClass, "pt-2 pb-3")}>
               <ItemGrid density="dense">
                 {filteredSpaces.map((s) => (
-                  <SpaceCard key={s.id} space={s} onEdit={openEditSpace} />
+                  <SpaceCard
+                    key={s.id}
+                    space={s}
+                    onEdit={openEditSpace}
+                    usingAgentNames={
+                      agentUsageKnown ? (spaceAgentUsage[s.id] ?? []) : null
+                    }
+                  />
                 ))}
               </ItemGrid>
             </div>
