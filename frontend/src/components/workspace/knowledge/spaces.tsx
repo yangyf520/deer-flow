@@ -10,9 +10,9 @@ import {
   DialogInputField,
   DialogSlotField,
   FormDialog,
+  NumberInput,
   dialogSaveFooterProps,
 } from "@/components/component";
-import { Input } from "@/components/ui/input";
 import { useI18n } from "@/core/i18n/hooks";
 import type { Space } from "@/core/knowledge";
 import { buildSpaceEditMeta } from "@/core/knowledge";
@@ -74,30 +74,24 @@ function SpaceFormFields({
             className="w-full"
           />
         </DialogSlotField>
-        <DialogSlotField label={t.knowledge.fieldTopK}>
-          <Input
-            type="number"
-            min={1}
-            max={50}
-            step={1}
-            className="h-9 w-full"
-            value={topK}
-            onChange={(e) => setTopK(e.target.value)}
-            disabled={disabled}
-          />
-        </DialogSlotField>
-        <DialogSlotField label={t.knowledge.fieldScore}>
-          <Input
-            type="number"
-            min={0}
-            max={1}
-            step={0.01}
-            className="h-9 w-full"
-            value={score}
-            onChange={(e) => setScore(e.target.value)}
-            disabled={disabled}
-          />
-        </DialogSlotField>
+        <NumberInput
+          label={t.knowledge.fieldTopK}
+          value={topK}
+          onChange={setTopK}
+          min={1}
+          max={50}
+          step={1}
+          disabled={disabled}
+        />
+        <NumberInput
+          label={t.knowledge.fieldScore}
+          value={score}
+          onChange={setScore}
+          min={0}
+          max={1}
+          step={0.01}
+          disabled={disabled}
+        />
       </DialogFieldGrid>
     </DialogFormSection>
   );

@@ -25,30 +25,15 @@ import { useI18n } from "@/core/i18n/hooks";
 import {
   createSpace,
   deleteSpace,
+  DEFAULT_SCORE,
+  DEFAULT_TOP_K,
   listMySpaces,
+  parseRetrievalPayload,
   spaceEditId,
   updateSpace,
   type Space,
 } from "@/core/knowledge";
 import { cn } from "@/lib/utils";
-
-const DEFAULT_TOP_K = 8;
-const DEFAULT_SCORE = 0.35;
-
-function parseRetrievalPayload(topK: string, score: string) {
-  const parsedTopK = Number.parseInt(topK, 10);
-  const parsedScore = Number.parseFloat(score);
-  return {
-    top_k:
-      Number.isFinite(parsedTopK) && parsedTopK >= 1 && parsedTopK <= 50
-        ? parsedTopK
-        : DEFAULT_TOP_K,
-    score:
-      Number.isFinite(parsedScore) && parsedScore >= 0 && parsedScore <= 1
-        ? parsedScore
-        : DEFAULT_SCORE,
-  };
-}
 
 export default function KnowledgeSpacesPage() {
   const { t } = useI18n();

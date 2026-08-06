@@ -74,6 +74,7 @@ export {
 } from "./styles";
 export { InlineEmpty, ListEmpty, PageEmptyState, PanelEmpty } from "./empty";
 export { FormField } from "./form-field";
+export { NumberInput, type NumberInputProps } from "./number";
 export { Search } from "./search";
 export { ResourceList, ResourceRow } from "./resource-row";
 export { Section } from "./section";

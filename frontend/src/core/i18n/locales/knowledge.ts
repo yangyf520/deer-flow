@@ -139,8 +139,6 @@ export type KnowledgeTranslations = {
   questionPlaceholder: string;
   deleteQuestion: string;
   addQuestion: string;
-  topKPrefix: string;
-  topKSuffix: string;
   runningEval: string;
   runEval: string;
   questionsCount: string;
@@ -329,13 +327,11 @@ export const knowledgeEnUS: KnowledgeTranslations = {
   emptyGrants: "No grants configured",
   deleteGrantTooltip: "Remove grant",
   evalTitle: "Retrieval eval",
-  evalDescription: "Run batch queries (top {count} hits shown per question)",
+  evalDescription: "Run batch queries and review recall results",
   needQuestion: "Enter at least one question",
   questionPlaceholder: "Evaluation question",
   deleteQuestion: "Remove question",
   addQuestion: "Add question",
-  topKPrefix: "Top",
-  topKSuffix: "hits per question",
   runningEval: "Running…",
   runEval: "Run eval",
   questionsCount: "{count} questions",
@@ -473,7 +469,7 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   scenarioCreated: "码表已创建",
   scenarioUpdated: "码表已更新",
   scenarioDeleted: "码表已删除",
-  fieldTopK: "召回数量",
+  fieldTopK: "召回条数",
   fieldScore: "相似度阈值",
   editSpace: "编辑空间",
   editDocument: "编辑文档",
@@ -565,13 +561,11 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   emptyGrants: "尚未配置授权",
   deleteGrantTooltip: "移除授权",
   evalTitle: "检索评测",
-  evalDescription: "批量运行查询（每题展示前 {count} 条命中）",
+  evalDescription: "批量运行查询，查看召回结果",
   needQuestion: "请至少输入一个问题",
   questionPlaceholder: "评测问题",
   deleteQuestion: "删除问题",
   addQuestion: "添加问题",
-  topKPrefix: "每题取前",
-  topKSuffix: "条命中",
   runningEval: "运行中…",
   runEval: "运行评测",
   questionsCount: "{count} 个问题",

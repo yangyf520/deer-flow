@@ -1,11 +1,14 @@
 import { cookies } from "next/headers";
+import { Suspense } from "react";
 import { Toaster } from "sonner";
 
 import { QueryClientProvider } from "@/components/query-client-provider";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { CommandPalette } from "@/components/workspace/command-palette";
 import { GatewayOfflineBanner } from "@/components/workspace/gateway-offline-banner";
+import { SettingsDialogHost } from "@/components/workspace/settings";
 import { AppSidebar } from "@/components/workspace/shell";
+import { WorkspaceSettingsDeepLink } from "@/components/workspace/workspace-settings-deep-link";
 
 function parseSidebarOpenCookie(
   value: string | undefined,
@@ -37,6 +40,10 @@ export async function WorkspaceContent({
         </SidebarInset>
       </SidebarProvider>
       <CommandPalette />
+      <SettingsDialogHost />
+      <Suspense fallback={null}>
+        <WorkspaceSettingsDeepLink />
+      </Suspense>
       <Toaster position="top-center" />
     </QueryClientProvider>
   );

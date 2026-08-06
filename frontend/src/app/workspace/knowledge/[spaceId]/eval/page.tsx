@@ -8,10 +8,15 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import { PageShell } from "@/app/workspace/knowledge/ui";
-import { AlertError, Header, InlineEmpty } from "@/components/component";
+import {
+  AlertError,
+  InlineEmpty,
+  NumberInput,
+  Shell,
+  ShellHeader,
+} from "@/components/component";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,7 +31,15 @@ import { Input } from "@/components/ui/input";
 import { Tooltip } from "@/components/workspace/tooltip";
 import { useI18n } from "@/core/i18n/hooks";
 import type { Translations } from "@/core/i18n/locales/types";
-import { searchKnowledge, type EvidenceItem } from "@/core/knowledge";
+import {
+  DEFAULT_SCORE,
+  DEFAULT_TOP_K,
+  getSpace,
+  parseRetrievalPayload,
+  searchKnowledge,
+  updateSpace,
+  type EvidenceItem,
+} from "@/core/knowledge";
 
 const DEFAULT_QUESTIONS = [""];
 const PREVIEW_COUNT = 5;
@@ -189,13 +202,13 @@ function QuestionBlock({
   const hidden = Math.max(0, result.items.length - PREVIEW_COUNT);
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b pb-2">
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-1.5 border-b pb-1.5">
         <h2 className="text-base font-medium">
           <span className="text-muted-foreground mr-2">Q{index + 1}</span>
           {result.q}
         </h2>
-        <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
           <span>{formatMs(result.latencyMs)}</span>
           <span>
             {result.items.length === 0
@@ -259,12 +272,28 @@ export default function KnowledgeEvalPage() {
   const spaceId = params.spaceId;
   const { t } = useI18n();
   const [questions, setQuestions] = useState<string[]>(DEFAULT_QUESTIONS);
-  const [topK, setTopK] = useState(5);
+  const [topK, setTopK] = useState(String(DEFAULT_TOP_K));
+  const [score, setScore] = useState(String(DEFAULT_SCORE));
   const [results, setResults] = useState<QuestionResult[] | null>(null);
   const [totalLatencyMs, setTotalLatencyMs] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [questionToDelete, setQuestionToDelete] = useState<number | null>(null);
+
+  useEffect(() => {
+    void getSpace(spaceId)
+      .then((space) => {
+        setTopK(
+          space.top_k != null ? String(space.top_k) : String(DEFAULT_TOP_K),
+        );
+        setScore(
+          space.score != null ? String(space.score) : String(DEFAULT_SCORE),
+        );
+      })
+      .catch(() => {
+        /* keep defaults */
+      });
+  }, [spaceId]);
 
   async function onRun() {
     const qs = questions.map((q) => q.trim()).filter(Boolean);
@@ -275,13 +304,21 @@ export default function KnowledgeEvalPage() {
     setBusy(true);
     const wallStart = performance.now();
     try {
+      const retrieval = parseRetrievalPayload(topK, score);
+      await updateSpace(spaceId, {
+        top_k: retrieval.top_k,
+        score: retrieval.score,
+      });
+      setTopK(String(retrieval.top_k));
+      setScore(String(retrieval.score));
+
       const next: QuestionResult[] = [];
       for (const q of qs) {
         const t0 = performance.now();
         const res = await searchKnowledge({
           query: q,
           spaces: [spaceId],
-          top_k: topK,
+          top_k: retrieval.top_k,
         });
         next.push({
           q,
@@ -338,131 +375,145 @@ export default function KnowledgeEvalPage() {
   }
 
   return (
-    <PageShell className="gap-5">
-      <Header
-        backHref={`/workspace/knowledge/${spaceId}`}
-        title={t.knowledge.evalTitle}
-        description={t.knowledge.evalDescription.replace(
-          "{count}",
-          String(PREVIEW_COUNT),
-        )}
-      />
+    <>
+      <Shell
+        header={
+          <ShellHeader
+            backHref={`/workspace/knowledge/${spaceId}`}
+            title={t.knowledge.evalTitle}
+            description={t.knowledge.evalDescription}
+          />
+        }
+        contentClassName="max-w-5xl"
+        contentGapClassName="gap-5"
+      >
+        <AlertError>{error}</AlertError>
 
-      <AlertError>{error}</AlertError>
-
-      <section className="bg-card flex flex-col gap-4 rounded-xl border p-5 shadow-xs">
-        <div className="flex flex-col gap-2">
-          {questions.map((q, index) => (
-            <div key={index} className="flex items-center gap-2">
-              <Input
-                placeholder={t.knowledge.questionPlaceholder}
-                value={q}
-                onChange={(e) =>
-                  setQuestions((prev) =>
-                    prev.map((item, i) =>
-                      i === index ? e.target.value : item,
-                    ),
-                  )
-                }
-              />
-              <Tooltip content={t.knowledge.deleteQuestion}>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-muted-foreground shrink-0"
-                  disabled={questions.length <= 1}
-                  onClick={() => requestDeleteQuestion(index)}
-                >
-                  <Trash2Icon className="size-4" />
-                  <span className="sr-only">{t.knowledge.deleteQuestion}</span>
-                </Button>
-              </Tooltip>
-            </div>
-          ))}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setQuestions((prev) => [...prev, ""])}
-          >
-            <PlusIcon className="size-4" />
-            {t.knowledge.addQuestion}
-          </Button>
-          <label className="text-muted-foreground flex items-center gap-2 text-sm">
-            {t.knowledge.topKPrefix}
-            <Input
-              type="number"
-              min={1}
-              max={50}
-              className="h-9 w-16"
-              value={topK}
-              onChange={(e) => setTopK(Number(e.target.value) || 5)}
-            />
-            {t.knowledge.topKSuffix}
-          </label>
-          <Button disabled={busy} onClick={() => void onRun()}>
-            <PlayIcon className="size-4" />
-            {busy ? t.knowledge.runningEval : t.knowledge.runEval}
-          </Button>
-        </div>
-      </section>
-
-      {results ? (
-        <section className="flex flex-col gap-8">
-          <div className="flex flex-wrap gap-2 text-xs">
-            <Badge variant="outline">
-              {t.knowledge.questionsCount.replace(
-                "{count}",
-                String(results.length),
-              )}
-            </Badge>
-            <Badge variant="outline">
-              {t.knowledge.totalLatency.replace(
-                "{latency}",
-                formatMs(totalLatencyMs),
-              )}
-            </Badge>
-            <Badge variant="outline">
-              {t.knowledge.avgLatency.replace(
-                "{latency}",
-                formatMs(avgLatency),
-              )}
-            </Badge>
-            <Badge variant="outline">
-              {t.knowledge.hitChunks.replace("{count}", String(totalHits))}
-            </Badge>
-            <Badge variant="outline">
-              {t.knowledge.docsTouched.replace("{count}", String(uniqueDocs))}
-            </Badge>
-            {emptyQuestions > 0 ? (
-              <Badge variant="destructive">
-                {t.knowledge.emptyRecallCount.replace(
-                  "{count}",
-                  String(emptyQuestions),
-                )}
-              </Badge>
-            ) : null}
-            {lowTop > 0 ? (
-              <Badge variant="secondary">
-                {t.knowledge.lowTopCount.replace("{count}", String(lowTop))}
-              </Badge>
-            ) : null}
+        <section className="bg-card flex flex-col gap-4 rounded-xl border p-5 shadow-xs">
+          <div className="flex flex-col gap-2">
+            {questions.map((q, index) => (
+              <div key={index} className="flex items-center gap-2">
+                <Input
+                  placeholder={t.knowledge.questionPlaceholder}
+                  value={q}
+                  onChange={(e) =>
+                    setQuestions((prev) =>
+                      prev.map((item, i) =>
+                        i === index ? e.target.value : item,
+                      ),
+                    )
+                  }
+                />
+                <Tooltip content={t.knowledge.deleteQuestion}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground shrink-0"
+                    disabled={questions.length <= 1}
+                    onClick={() => requestDeleteQuestion(index)}
+                  >
+                    <Trash2Icon className="size-4" />
+                    <span className="sr-only">
+                      {t.knowledge.deleteQuestion}
+                    </span>
+                  </Button>
+                </Tooltip>
+              </div>
+            ))}
           </div>
 
-          {results.map((r, qi) => (
-            <QuestionBlock
-              key={`${qi}-${r.q}`}
-              result={r}
-              index={qi}
-              t={t.knowledge}
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setQuestions((prev) => [...prev, ""])}
+            >
+              <PlusIcon className="size-4" />
+              {t.knowledge.addQuestion}
+            </Button>
+            <NumberInput
+              layout="inline"
+              label={t.knowledge.fieldTopK}
+              value={topK}
+              onChange={setTopK}
+              min={1}
+              max={50}
+              step={1}
+              disabled={busy}
             />
-          ))}
+            <NumberInput
+              layout="inline"
+              label={t.knowledge.fieldScore}
+              value={score}
+              onChange={setScore}
+              min={0}
+              max={1}
+              step={0.01}
+              inputClassName="w-20"
+              disabled={busy}
+            />
+            <Button disabled={busy} size="sm" onClick={() => void onRun()}>
+              <PlayIcon className="size-4" />
+              {busy ? t.knowledge.runningEval : t.knowledge.runEval}
+            </Button>
+          </div>
         </section>
-      ) : null}
+
+        {results ? (
+          <section className="flex flex-col gap-4">
+            <div className="flex flex-wrap gap-1.5 text-xs">
+              <Badge variant="outline">
+                {t.knowledge.questionsCount.replace(
+                  "{count}",
+                  String(results.length),
+                )}
+              </Badge>
+              <Badge variant="outline">
+                {t.knowledge.totalLatency.replace(
+                  "{latency}",
+                  formatMs(totalLatencyMs),
+                )}
+              </Badge>
+              <Badge variant="outline">
+                {t.knowledge.avgLatency.replace(
+                  "{latency}",
+                  formatMs(avgLatency),
+                )}
+              </Badge>
+              <Badge variant="outline">
+                {t.knowledge.hitChunks.replace("{count}", String(totalHits))}
+              </Badge>
+              <Badge variant="outline">
+                {t.knowledge.docsTouched.replace("{count}", String(uniqueDocs))}
+              </Badge>
+              {emptyQuestions > 0 ? (
+                <Badge variant="destructive">
+                  {t.knowledge.emptyRecallCount.replace(
+                    "{count}",
+                    String(emptyQuestions),
+                  )}
+                </Badge>
+              ) : null}
+              {lowTop > 0 ? (
+                <Badge variant="secondary">
+                  {t.knowledge.lowTopCount.replace("{count}", String(lowTop))}
+                </Badge>
+              ) : null}
+            </div>
+
+            {results.map((r, qi) => (
+              <QuestionBlock
+                key={`${qi}-${r.q}`}
+                result={r}
+                index={qi}
+                t={t.knowledge}
+              />
+            ))}
+          </section>
+        ) : null}
+      </Shell>
 
       <Dialog
         open={questionToDelete != null}
@@ -493,6 +544,6 @@ export default function KnowledgeEvalPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </PageShell>
+    </>
   );
 }
