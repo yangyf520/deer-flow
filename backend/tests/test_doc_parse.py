@@ -133,11 +133,6 @@ def test_collect_warnings_grounding():
     assert any("paraphrase" in w for w in warnings)
 
 
-def test_find_row_no():
-    source = "header\n\n## Section\n\nclause one\n\nclause two"
-    assert pipeline._find_row_no("clause one", source) == 5
-
-
 def test_attach_row_no_uuid():
     import uuid as uuid_mod
 
@@ -148,7 +143,7 @@ def test_attach_row_no_uuid():
             {"segment_label": "第2条", "body": "正文二"},
         ],
     }
-    pipeline._attach_row_no(data, source_text="ignored")
+    pipeline._attach_row_no(data)
     ids = [detail["row_no"] for detail in data["details"]]
     assert all(isinstance(row_id, str) and row_id for row_id in ids)
     assert len(set(ids)) == 2
@@ -166,7 +161,7 @@ def test_attach_row_no_preserves_uuid():
             {"body": "four"},
         ],
     }
-    pipeline._attach_row_no(data, source_text="line one\nline two\nline three")
+    pipeline._attach_row_no(data)
     assert data["details"][0]["row_no"] == existing
     assert data["details"][1]["row_no"] != "1"
     assert data["details"][2]["row_no"] != "143"
@@ -176,49 +171,6 @@ def test_attach_row_no_preserves_uuid():
     for detail in data["details"][1:]:
         uuid_mod.UUID(detail["row_no"])
     assert len({d["row_no"] for d in data["details"]}) == 4
-
-
-def test_normalize_chapter_paths():
-    data = {
-        "details": [
-            {"segment_label": "第一条", "chapter_path": "第一章 总则", "body": "a"},
-            {"segment_label": "第二条", "chapter_path": "第二条", "body": "b"},
-            {"segment_label": "第八条", "chapter_path": "第八条", "body": "c"},
-            {"segment_label": "第十八条", "chapter_path": "第三章 监督检查和法律责任", "body": "d"},
-            {"segment_label": "第十九条", "chapter_path": "第十九条", "body": "e"},
-        ],
-    }
-    pipeline._normalize_chapter_paths(data, hints=legal_hints())
-    assert data["details"][0]["chapter_path"] == "第一章 总则"
-    assert data["details"][1]["chapter_path"] == "第一章 总则"
-    assert data["details"][2]["chapter_path"] == "第一章 总则"
-    assert data["details"][3]["chapter_path"] == "第三章 监督检查和法律责任"
-    assert data["details"][4]["chapter_path"] == "第三章 监督检查和法律责任"
-
-
-def test_repair_body_from_source():
-    source = "第一条　原文一。\n\n第二条　原文二内容。"
-    repaired = pipeline._repair_body_from_source(
-        label="第二条",
-        body="模型改写过的句子。",
-        source_text=source,
-        hints=legal_hints(),
-    )
-    assert repaired == "原文二内容。"
-
-
-def test_repair_details_from_source():
-    source = "第一条　原文一。\n\n第二条　原文二内容。"
-    data = {
-        "details": [
-            {"segment_label": "第一条", "body": "原文一。"},
-            {"segment_label": "第二条", "body": "模型改写过的句子。"},
-        ],
-    }
-    pipeline._repair_details_from_source(data, source_text=source, hints=legal_hints())
-    assert data["details"][1]["body"] == "原文二内容。"
-    warnings = pipeline._collect_warnings(data, source_text=source)
-    assert not any("paraphrase" in w for w in warnings)
 
 
 def test_grounding_nfkc():
@@ -282,21 +234,19 @@ def test_parse_parallel_batches(monkeypatch):
 
 def test_prompt_hints_legal():
     hints = legal_hints()
-    assert hints.label_field == "segment_label"
-    assert hints.chapter_field == "chapter_path"
-    assert hints.matches_label("第一条")
-    assert hints.matches_label("第18条")
-    assert not hints.matches_label("第一章 总则")
-    assert hints.looks_like_chapter("第一章 总则", label="第一条")
-    assert not hints.looks_like_chapter("第二条", label="第二条")
+    assert len(hints.split_patterns) == 1
+    text = "前言\n\n**第一条**　a\n\n**第二条**　b"
+    parts = pipeline._split_by_prompt_patterns(text, hints)
+    assert len(parts) >= 2
 
 
 def test_prompt_hints_english():
     prompt = 'Example: {"title":"…","details":[{"segment_label":"Section 1","chapter_path":"Chapter 1 General","body":"…"}]}'
     hints = extract_prompt_hints(prompt)
-    assert hints.matches_label("Section 1")
-    assert hints.matches_label("section 2")
-    assert hints.looks_like_chapter("Chapter 3 Liability", label="Section 1")
+    assert len(hints.split_patterns) == 1
+    text = "Preamble\n\nSection 1 text\n\nSection 2 text"
+    parts = pipeline._split_by_prompt_patterns(text, hints)
+    assert len(parts) >= 2
 
 
 def test_markdown_blocks_prompt_split():
@@ -377,6 +327,13 @@ def test_parse_timeout(monkeypatch):
     assert exc_info.value.status_code == 504
 
 
+def test_batch_limits_from_model():
+    limits = pipeline.resolve_parse_batch_limits(app_config=parse_app_config())
+    assert limits.max_chars == (128_000 - 2048 - 8192) * 2
+    assert limits.max_blocks == 12
+    assert limits.max_concurrent == 8
+
+
 def test_batch_limits_missing_max_tokens():
     from deerflow.config.app_config import AppConfig
     from deerflow.config.model_config import ModelConfig
@@ -397,27 +354,10 @@ def test_batch_limits_missing_max_tokens():
         pipeline.resolve_parse_batch_limits(app_config=app_config)
 
 
-def test_batch_limits_from_config():
-    from deerflow.config.app_config import AppConfig
-    from deerflow.config.model_config import ModelConfig
-    from deerflow.config.sandbox_config import SandboxConfig
-
-    app_config = AppConfig(
-        models=[
-            ModelConfig(
-                name="default",
-                display_name="Default",
-                use="langchain_openai:ChatOpenAI",
-                model="test",
-                max_tokens=16384,
-            )
-        ],
-        sandbox=SandboxConfig(use="deerflow.sandbox.local:LocalSandboxProvider"),
-    )
-    limits = pipeline.resolve_parse_batch_limits(app_config=app_config)
-    assert limits.max_chars == (128_000 - 2048 - 16_384) * 2
-    assert limits.max_blocks == 40
-    assert limits.max_concurrent == 8
+def test_batches_single_shot_compact():
+    blocks = [f"**第{i}条**　内容{i}" for i in range(1, 11)]
+    batches = pipeline._batches(blocks, max_chars=200_000, max_blocks=40)
+    assert len(batches) == 1
 
 
 def test_validate_schema_fails():
