@@ -222,6 +222,7 @@ skills:
 #        FEISHU_APP_ID: "cli_xxx"
 #        FEISHU_APP_SECRET: "xxx"
 #        GITHUB_TOKEN: "ghp_xxx"
+#        RECRUITMENT_MCP_API_KEY: "replace-with-a-secret-value"
 secrets: {}
 # -- Use an existing Secret instead of creating one from `secrets` above.
 existingSecret: ""
@@ -338,4 +339,23 @@ config: |
 
 # -- DeerFlow extensions_config.json content (MCP servers + skill state).
 extensionsConfig: |
-  {"mcpServers":{},"skills":{}}
+  {
+    "mcpServers": {
+      "career-recruitment": {
+        "enabled": true,
+        "type": "http",
+        "url": "http://10.199.56.34:8010/mcp",
+        "headers": {
+          "X-API-Key": "$RECRUITMENT_MCP_API_KEY"
+        },
+        "description": "只读公开招聘职位搜索与职位详情",
+        "tool_name_prefix": true,
+        "routing": {
+          "mode": "prefer",
+          "priority": 80,
+          "keywords": ["招聘", "职位", "岗位", "社招", "校招", "公开职位"]
+        }
+      }
+    },
+    "skills": {}
+  }
