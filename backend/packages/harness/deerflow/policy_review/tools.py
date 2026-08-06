@@ -386,7 +386,7 @@ async def prepare_tool(
     title: str | None = None,
     top_k: int | None = None,
 ) -> str | Command:
-    """Parse uploaded docx/pdf/md via Docling and batch-retrieve evidence.
+    """Parse uploaded docx/pdf/md (Docling, MarkItDown fallback) and batch-retrieve evidence.
 
     Call this for policy / legal pre-review of an upload (parse + evidence
     retrieve). Prefer this over a plain ``read_file`` for review workflows;

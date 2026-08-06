@@ -57,14 +57,14 @@ def section_title(node: Any, index: int) -> str:
 
 
 def prepare_sections(path: Path | str, *, title: str | None = None) -> dict[str, Any]:
-    """Parse with Docling, then split Markdown via LlamaIndex MarkdownNodeParser."""
+    """Parse with Docling (MarkItDown fallback), then split Markdown via LlamaIndex MarkdownNodeParser."""
     from llama_index.core import Document
     from llama_index.core.node_parser import MarkdownNodeParser
 
-    from deerflow.utils.file_conversion import parse_docling
+    from deerflow.utils.file_conversion import parse_file_bytes_with_fallback
 
     doc_path = Path(path)
-    parsed = parse_docling(doc_path)
+    parsed, parse_backend = parse_file_bytes_with_fallback(doc_path.read_bytes(), doc_path.name)
     if parsed.parse_quality == "failed" or not (parsed.text or "").strip():
         raise ValueError(parsed.error or f"parse failed for {doc_path.name}")
 
@@ -97,6 +97,7 @@ def prepare_sections(path: Path | str, *, title: str | None = None) -> dict[str,
         "source_path": str(doc_path),
         "title": title or doc_path.stem,
         "parse_quality": parsed.parse_quality,
+        "parse_backend": parse_backend,
         "parse_error": parsed.error,
         "markdown_chars": len(parsed.text or ""),
         "section_count": len(sections),

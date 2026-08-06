@@ -16,6 +16,7 @@ from deerflow.policy_review.pipeline import (
     extract_quote_candidates,
     finalize_review,
     merge_sections,
+    prepare_sections,
     retrieve_for_sections,
     section_query,
 )
@@ -27,6 +28,25 @@ def test_section_query_accepts_section_results_shape():
     assert section_query({"section_id": "section-1", "query": "密钥管理\n范围"}) == "密钥管理\n范围"
     assert section_query({"id": "s1", "title": "范围", "body": "正文"}) == "范围\n正文"
     assert section_query({}) == ""
+
+
+def test_prepare_sections_falls_back_when_docling_unavailable(tmp_path, monkeypatch):
+    from deerflow.utils.file_conversion import ParseResult
+
+    doc = tmp_path / "policy.docx"
+    doc.write_bytes(b"fake-docx")
+
+    monkeypatch.setattr(
+        "deerflow.utils.file_conversion.parse_file_bytes_with_fallback",
+        lambda _data, _name: (ParseResult(text="# 标题\n\n正文", parse_quality="ok"), "markitdown"),
+    )
+
+    out = prepare_sections(doc, title="密钥管理 PRD")
+
+    assert out["parse_backend"] == "markitdown"
+    assert out["title"] == "密钥管理 PRD"
+    assert out["section_count"] >= 1
+    assert any("正文" in str(section.get("body") or "") for section in out["sections"])
 
 
 @pytest.mark.asyncio
