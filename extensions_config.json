@@ -5,7 +5,7 @@
       "type": "http",
       "url": "http://10.199.56.34:8010/mcp",
       "headers": {
-        "Authorization": "$RECRUITMENT_MCP_AUTHORIZATION"
+        "X-API-Key": "$RECRUITMENT_MCP_API_KEY"
       },
       "description": "只读公开招聘职位搜索与职位详情",
       "tool_name_prefix": true,
