@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "career-recruitment": {
+      "enabled": true,
+      "type": "http",
+      "url": "http://10.199.56.34:8010/mcp",
+      "headers": {
+        "Authorization": "$RECRUITMENT_MCP_AUTHORIZATION"
+      },
+      "description": "只读公开招聘职位搜索与职位详情",
+      "tool_name_prefix": true,
+      "routing": {
+        "mode": "prefer",
+        "priority": 80,
+        "keywords": [
+          "招聘",
+          "职位",
+          "岗位",
+          "社招",
+          "校招",
+          "公开职位"
+        ]
+      }
+    }
+  },
+  "skills": {}
+}
