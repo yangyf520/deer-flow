@@ -126,9 +126,9 @@ spec:
                   key: redis-url
             {{- end }}
             - name: NO_PROXY
-              value: localhost,127.0.0.1,::1,10.199.56.34,gateway,frontend,nginx,provisioner
+              value: localhost,127.0.0.1,::1,gateway,frontend,nginx,provisioner
             - name: no_proxy
-              value: localhost,127.0.0.1,::1,10.199.56.34,gateway,frontend,nginx,provisioner
+              value: localhost,127.0.0.1,::1,gateway,frontend,nginx,provisioner
           {{- if or .Values.secrets .Values.existingSecret }}
           envFrom:
             - secretRef:
