@@ -136,7 +136,7 @@ const itemCardIconShellClass =
 
 const itemCardIconPrimaryClass = cn(
   itemCardIconShellClass,
-  "border-primary/35 bg-primary/10 text-primary",
+  "border-sky-500/35 bg-sky-500/12 text-sky-700 dark:text-sky-300",
 );
 
 export const itemCardIconToneClass = {
@@ -144,6 +144,7 @@ export const itemCardIconToneClass = {
   knowledge: itemCardIconPrimaryClass,
   api: itemCardIconPrimaryClass,
   agent: itemCardIconPrimaryClass,
+  disabled: cn(itemCardIconPrimaryClass, "opacity-70 grayscale"),
 } as const;
 
 export const itemCardIconClass = "size-4";

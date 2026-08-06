@@ -74,8 +74,8 @@ import { MyListRow } from "@/components/workspace/my-feature/my-list-row";
 
 | Prop | Purpose |
 |------|---------|
-| `search?` | Toolbar search field (`Search`); optional `autoFocus` for pages that want the filter focused on land. When the query is non-empty, infinite scroll auto-load is off and the panel footer shows load-more. |
-| `pagination?` | Infinite scroll sentinel + loading line; search-mode footer. Wire to TanStack `useInfiniteQuery` (or similar). |
+| `search?` | Toolbar search field (`Search`); optional `autoFocus` for pages that want the filter focused on land. |
+| `pagination?` | Infinite scroll sentinel + loading line; wire to TanStack `useInfiniteQuery` (or similar). Scroll loads more automatically, including while searching. |
 | `toolbar?` | Extra filters beside search (`ListFilterField`, custom controls). |
 | `isLoading` / `loadingLabel` | Initial fetch placeholder. |
 | `isEmpty` / `empty` | No data at all. |
@@ -100,7 +100,7 @@ For flush rows inside `WorkspaceIndexList` (or `ItemList`):
 | `ItemRowTitle` | Primary line; optional `href`. |
 | `ItemRowSubtitle` | Secondary line under title. |
 | `ItemRowMeta` | Bottom meta row. |
-| `ItemRowStatusBadge` / `ItemRowTag` | Status and kind chips. |
+| `ItemRowStatusBadge` / `ItemRowTag` | Status and kind chips. Use `itemRowStatusToneFromValue()` for lifecycle states (green / amber / red). |
 | `CardAction` | Icon button for row/card actions. |
 | `dotSeparatedMeta` | Join meta segments with middots. |
 

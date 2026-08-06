@@ -37,6 +37,7 @@ export type ItemRowStatusTone =
   | "success"
   | "warning"
   | "info"
+  | "primary"
   | "danger"
   | "neutral"
   | "muted";
@@ -47,12 +48,52 @@ export const itemRowStatusToneClass: Record<ItemRowStatusTone, string> = {
   warning:
     "border-amber-500/35 bg-amber-500/12 text-amber-900 dark:text-amber-200",
   info: "border-sky-500/35 bg-sky-500/12 text-sky-900 dark:text-sky-200",
+  primary: "border-sky-500/35 bg-sky-500/12 text-sky-900 dark:text-sky-200",
   danger:
     "border-destructive/45 bg-destructive/12 text-destructive dark:text-red-300",
   neutral: "border-border/60 bg-muted/45 text-foreground",
   muted:
     "border-border/50 bg-muted/25 text-muted-foreground dark:text-muted-foreground",
 };
+
+const itemRowStatusSuccessValues = new Set([
+  "ready",
+  "success",
+  "enabled",
+  "active",
+  "completed",
+  "done",
+  "ok",
+]);
+
+const itemRowStatusWarningValues = new Set([
+  "processing",
+  "pending",
+  "queued",
+  "running",
+  "paused",
+  "in_progress",
+  "embedding",
+  "parsing",
+  "warning",
+]);
+
+const itemRowStatusDangerValues = new Set(["failed", "error", "interrupted"]);
+
+/** Map lifecycle / workflow status strings to list row badge tones. */
+export function itemRowStatusToneFromValue(status: string): ItemRowStatusTone {
+  const key = status.trim().toLowerCase();
+  if (itemRowStatusSuccessValues.has(key)) {
+    return "success";
+  }
+  if (itemRowStatusDangerValues.has(key)) {
+    return "danger";
+  }
+  if (itemRowStatusWarningValues.has(key)) {
+    return "warning";
+  }
+  return "neutral";
+}
 
 /** Mask sensitive strings as `{prefix}{start}*{end}` (e.g. tokens, key prefixes). */
 export function maskMiddle(
@@ -80,6 +121,41 @@ export function maskMiddle(
     return normalized;
   }
   return `${prefix}${body.slice(0, start)}${mask}${body.slice(-end)}`;
+}
+
+/** Mask API key for display: fixed `dfk_{6}*{6}` width on the secret body. */
+export function formatApiKeyPrefixDisplay(
+  value: string,
+  {
+    leadingPrefix = "dfk_",
+    start = 6,
+    end = 6,
+    mask = "*",
+    placeholder = "·",
+  }: {
+    leadingPrefix?: string;
+    start?: number;
+    end?: number;
+    mask?: string;
+    placeholder?: string;
+  } = {},
+): string {
+  if (mask.length > 0 && value.includes(mask)) {
+    return value;
+  }
+
+  const normalized = value.endsWith("…") ? value.slice(0, -1) : value;
+  const prefix =
+    leadingPrefix && normalized.startsWith(leadingPrefix) ? leadingPrefix : "";
+  const body = prefix ? normalized.slice(prefix.length) : normalized;
+  if (!body) {
+    return normalized;
+  }
+
+  const head = body.slice(0, start).padEnd(start, placeholder);
+  const tail =
+    body.length >= start + end ? body.slice(-end) : placeholder.repeat(end);
+  return `${prefix}${head}${mask}${tail}`;
 }
 
 export function ItemRowStatusBadge({
@@ -299,7 +375,7 @@ export function ItemCard({
                 ? "flex-col"
                 : metaTagsLayout === "inline-nowrap"
                   ? "min-h-[1.625rem] flex-nowrap"
-                  : "min-h-[1.625rem] flex-wrap",
+                  : "min-h-[1.625rem] flex-wrap gap-1",
             )}
           >
             {metaTags!.map((item, i) => (

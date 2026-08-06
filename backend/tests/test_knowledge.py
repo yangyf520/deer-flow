@@ -395,6 +395,37 @@ async def test_delete_space_clears_vectors_then_db():
         session.delete.assert_called_once_with(space)
 
 
+@pytest.mark.asyncio
+async def test_delete_all_documents_clears_vectors_then_db():
+    from deerflow.knowledge import service as knowledge_service
+
+    doc_a = SimpleNamespace(id="d1", space_id="legal")
+    doc_b = SimpleNamespace(id="d2", space_id="legal")
+    session = AsyncMock()
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = [doc_a, doc_b]
+    session.execute = AsyncMock(return_value=result)
+    session.delete = AsyncMock()
+    session.commit = AsyncMock()
+
+    async def _to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("deerflow.knowledge.service.asyncio.to_thread", side_effect=_to_thread),
+        patch("deerflow.knowledge.service.delete_document_vectors") as del_doc,
+    ):
+        del_doc.return_value = 1
+        deleted = await knowledge_service.delete_all_documents(
+            session,
+            space_id="legal",
+        )
+        assert deleted == 2
+        assert del_doc.call_count == 2
+        assert session.delete.call_count == 2
+        session.commit.assert_called_once()
+
+
 def test_delete_pgvector_predicate_covers_doc_id_fields():
     """Ensure delete helper targets ref_doc_id and metadata.doc_id (not only node list)."""
     import inspect

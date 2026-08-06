@@ -490,6 +490,23 @@ async def delete_document(space_id: str, doc_id: str, request: Request) -> None:
         await knowledge_service.delete_document(session, space_id=space_id, doc_id=doc_id)
 
 
+@router.delete("/spaces/{space_id}/documents", status_code=204)
+@require_auth
+@require_permission("knowledge", "write")
+async def delete_all_documents(space_id: str, request: Request) -> None:
+    user = _user(request)
+    factory = _session_factory()
+    async with factory() as session:
+        await knowledge_service.get_space_or_404(
+            session,
+            space_id=space_id,
+            user_id=_uid(user),
+            system_role=user.system_role,
+            min_role="editor",
+        )
+        await knowledge_service.delete_all_documents(session, space_id=space_id)
+
+
 @router.post("/spaces/{space_id}/documents/{doc_id}/reindex", response_model=DocumentImportResponse)
 @require_auth
 @require_permission("knowledge", "write")

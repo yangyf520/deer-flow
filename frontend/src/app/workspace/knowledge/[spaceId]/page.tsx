@@ -29,9 +29,13 @@ import {
   AlertError,
   ConfirmDialog,
   InlineEmpty,
+  ItemListInfiniteTail,
   ItemListPanel,
+  ItemRowStatusBadge,
   Shell,
   ShellHeader,
+  itemRowStatusToneFromValue,
+  useItemListInfiniteScroll,
 } from "@/components/component";
 import { workspacePageInsetXClass } from "@/components/component/styles";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +57,7 @@ import { useAuth } from "@/core/auth/AuthProvider";
 import { useI18n } from "@/core/i18n/hooks";
 import type { Translations } from "@/core/i18n/locales/types";
 import {
+  deleteAllDocuments,
   deleteDocument,
   docIngestModeLabel,
   getSpace,
@@ -95,15 +100,6 @@ function NoticeBanner({ children }: { children: React.ReactNode }) {
 
 const DOC_PAGE_SIZE = 20;
 const INGEST_POLL_MS = 3000;
-
-function statusVariant(
-  status: string,
-): "default" | "secondary" | "destructive" | "outline" {
-  if (status === "ready") return "default";
-  if (status === "failed") return "destructive";
-  if (status === "processing") return "secondary";
-  return "outline";
-}
 
 function ingestBadgeLabel(doc: KnowledgeDocument, t: KnowledgeT): string {
   if (doc.status === "ready") return t.status.ready;
@@ -217,6 +213,8 @@ export default function KnowledgeSpaceDocumentsPage() {
   const [docToDelete, setDocToDelete] = useState<KnowledgeDocument | null>(
     null,
   );
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
+  const [deleteAllBusy, setDeleteAllBusy] = useState(false);
   const uploadAbortRef = useRef<AbortController | null>(null);
 
   const docListFilters = useMemo(
@@ -287,6 +285,13 @@ export default function KnowledgeSpaceDocumentsPage() {
       setDocsLoadingMore(false);
     }
   }, [docListFilters, docs.length, docsLoadingMore, hasMoreDocs, spaceId]);
+
+  const docsSentinelRef = useItemListInfiniteScroll({
+    hasNextPage: hasMoreDocs,
+    isFetchingNextPage: docsLoadingMore,
+    onLoadMore: loadMoreDocs,
+    listLength: docs.length,
+  });
 
   useEffect(() => {
     setIngestMode(readStoredIngestMode(spaceId));
@@ -494,6 +499,21 @@ export default function KnowledgeSpaceDocumentsPage() {
     }
   }
 
+  async function onDeleteAll() {
+    setDeleteAllBusy(true);
+    setError(null);
+    try {
+      await deleteAllDocuments(spaceId);
+      setDeleteAllOpen(false);
+      setNotice(t.knowledge.deleteAllSuccess);
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeleteAllBusy(false);
+    }
+  }
+
   const docsCountLabel =
     docListFilters.q || docs.length < docsTotal
       ? t.knowledge.docsCountFiltered
@@ -564,6 +584,23 @@ export default function KnowledgeSpaceDocumentsPage() {
           </button>
         ) : null}
       </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="text-destructive hover:text-destructive shrink-0"
+        disabled={
+          docsTotal === 0 ||
+          busy ||
+          deleteAllBusy ||
+          deletingId != null ||
+          reindexingId != null
+        }
+        onClick={() => setDeleteAllOpen(true)}
+      >
+        <Trash2Icon className="size-3.5" />
+        {t.knowledge.deleteAllButton}
+      </Button>
       <input
         ref={reindexFileRef}
         type="file"
@@ -610,19 +647,6 @@ export default function KnowledgeSpaceDocumentsPage() {
           title={t.knowledge.docsList}
           countLabel={docsCountLabel}
           toolbar={docsToolbar}
-          footer={
-            hasMoreDocs ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                disabled={docsLoadingMore || busy}
-                onClick={() => void loadMoreDocs()}
-              >
-                {docsLoadingMore ? t.common.loading : t.common.loadMore}
-              </Button>
-            ) : undefined
-          }
         >
           {docs.length === 0 ? (
             <div className={cn(workspacePageInsetXClass, "py-2 sm:py-2.5")}>
@@ -680,13 +704,12 @@ export default function KnowledgeSpaceDocumentsPage() {
                     <div className="flex min-w-0 items-center justify-between gap-2">
                       <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                         {[
-                          <Badge
+                          <ItemRowStatusBadge
                             key="status"
-                            variant={statusVariant(d.status)}
-                            className="h-5 px-1.5 text-[10px] font-normal"
+                            tone={itemRowStatusToneFromValue(d.status)}
                           >
                             {ingestBadgeLabel(d, t.knowledge)}
-                          </Badge>,
+                          </ItemRowStatusBadge>,
                           ingestModeLabel ? (
                             <Badge
                               key="ingest-mode"
@@ -782,8 +805,29 @@ export default function KnowledgeSpaceDocumentsPage() {
               })}
             </ul>
           )}
+          {docs.length > 0 && hasMoreDocs ? (
+            <ItemListInfiniteTail
+              sentinelRef={docsSentinelRef}
+              isFetchingNextPage={docsLoadingMore}
+              loadingLabel={t.common.loading}
+            />
+          ) : null}
         </ItemListPanel>
       </Shell>
+
+      <ConfirmDialog
+        open={deleteAllOpen}
+        onOpenChange={(open) => !open && setDeleteAllOpen(false)}
+        title={t.knowledge.deleteAllTitle}
+        description={t.knowledge.deleteAllDescription(docsTotal)}
+        confirmLabel={
+          deleteAllBusy ? t.knowledge.deleting : t.knowledge.deleteAllButton
+        }
+        confirmPending={deleteAllBusy}
+        confirmVariant="destructive"
+        onConfirm={() => void onDeleteAll()}
+        onCancel={() => setDeleteAllOpen(false)}
+      />
 
       <ConfirmDialog
         open={docToDelete != null}

@@ -83,7 +83,9 @@ export function ItemListPanel({
           </div>
         ) : null}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {children}
+      </div>
       {footer ? <div className="shrink-0">{footer}</div> : null}
     </section>
   );
@@ -442,12 +444,12 @@ export function WorkspaceIndexList({
   listProps?: Omit<ComponentProps<"div">, "children">;
   children: ReactNode;
 }) {
-  const isSearching = Boolean(search?.value.trim());
+  const hasNextPage = Boolean(pagination?.hasNextPage);
   const sentinelRef = useItemListInfiniteScroll({
-    hasNextPage: Boolean(pagination?.hasNextPage),
+    hasNextPage,
     isFetchingNextPage: pagination?.isFetchingNextPage ?? false,
     onLoadMore: pagination?.onLoadMore ?? noopLoadMore,
-    autoLoad: Boolean(pagination) && !isSearching,
+    autoLoad: Boolean(pagination),
     listLength: pagination?.listLength ?? 0,
   });
 
@@ -466,34 +468,12 @@ export function WorkspaceIndexList({
       </ListPanelToolbar>
     ) : undefined;
 
-  const paginationFooter =
-    pagination && isSearching ? (
-      <ItemListLoadMoreFooter
-        hasNextPage={pagination.hasNextPage}
-        isFetchingNextPage={pagination.isFetchingNextPage}
-        onLoadMore={pagination.onLoadMore}
-        loadMoreLabel={pagination.loadMoreLabel}
-        loadMoreSearchLabel={pagination.loadMoreSearchLabel}
-        loadingLabel={pagination.loadingLabel}
-        isSearching
-        loadMoreTestId={pagination.loadMoreTestId}
-      />
-    ) : null;
-
-  const panelFooter =
-    paginationFooter || footer ? (
-      <>
-        {paginationFooter}
-        {footer}
-      </>
-    ) : undefined;
+  const panelFooter = footer ?? undefined;
 
   const showInfiniteTail =
-    Boolean(pagination) &&
-    !isSearching &&
-    !isLoading &&
-    !isEmpty &&
-    !isSearchEmpty;
+    Boolean(pagination) && !isLoading && !isEmpty && hasNextPage;
+
+  const showSearchEmpty = isSearchEmpty && (!pagination || !hasNextPage);
 
   return (
     <ItemListPanel
@@ -516,15 +496,21 @@ export function WorkspaceIndexList({
         <PanelEmpty align={emptyAlign} className={emptyClassName}>
           {empty}
         </PanelEmpty>
-      ) : isSearchEmpty ? (
+      ) : showSearchEmpty ? (
         <PanelEmpty align={emptyAlign} className={emptyClassName}>
           {searchEmpty}
         </PanelEmpty>
       ) : (
         <>
-          <ItemList variant="flush" data-testid={listTestId} {...listProps}>
-            {children}
-          </ItemList>
+          {!isSearchEmpty ? (
+            <ItemList variant="flush" data-testid={listTestId} {...listProps}>
+              {children}
+            </ItemList>
+          ) : (
+            <PanelEmpty align={emptyAlign} className={emptyClassName}>
+              {searchEmpty}
+            </PanelEmpty>
+          )}
           {showInfiniteTail ? (
             <ItemListInfiniteTail
               sentinelRef={sentinelRef}
@@ -633,7 +619,23 @@ function noopLoadMore(): void {
   return;
 }
 
-function useItemListInfiniteScroll({
+function getScrollParent(element: HTMLElement | null): Element | null {
+  let parent = element?.parentElement ?? null;
+  while (parent) {
+    const { overflowY } = getComputedStyle(parent);
+    if (
+      overflowY === "auto" ||
+      overflowY === "scroll" ||
+      overflowY === "overlay"
+    ) {
+      return parent;
+    }
+    parent = parent.parentElement;
+  }
+  return null;
+}
+
+export function useItemListInfiniteScroll({
   hasNextPage,
   isFetchingNextPage,
   onLoadMore,
@@ -647,28 +649,43 @@ function useItemListInfiniteScroll({
   listLength?: number;
 }) {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const onLoadMoreRef = useRef(onLoadMore);
+  const isFetchingRef = useRef(isFetchingNextPage);
+  const hasNextRef = useRef(hasNextPage);
+
+  onLoadMoreRef.current = onLoadMore;
+  isFetchingRef.current = isFetchingNextPage;
+  hasNextRef.current = hasNextPage;
 
   useEffect(() => {
     const element = sentinelRef.current;
     if (!element || !hasNextPage || !autoLoad) {
       return;
     }
+    const scrollRoot = getScrollParent(element);
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry?.isIntersecting && hasNextPage && !isFetchingNextPage) {
-          void onLoadMore();
+        if (
+          entry?.isIntersecting &&
+          hasNextRef.current &&
+          !isFetchingRef.current
+        ) {
+          void onLoadMoreRef.current();
         }
       },
-      { rootMargin: "200px 0px 200px 0px" },
+      {
+        root: scrollRoot,
+        rootMargin: "200px 0px 200px 0px",
+      },
     );
     observer.observe(element);
     return () => observer.disconnect();
-  }, [autoLoad, hasNextPage, isFetchingNextPage, listLength, onLoadMore]);
+  }, [autoLoad, hasNextPage, isFetchingNextPage, listLength]);
 
   return sentinelRef;
 }
 
-function ItemListInfiniteTail({
+export function ItemListInfiniteTail({
   sentinelRef,
   isFetchingNextPage,
   loadingLabel,

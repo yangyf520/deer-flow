@@ -13,6 +13,7 @@ import {
   DialogSlotField,
   FormActions,
   FormDialog,
+  FormDialogDeleteButton,
   buildFormDialogEditResourceMeta,
   dialogSaveFooterProps,
 } from "@/components/component";
@@ -320,9 +321,13 @@ interface ApiKeyEditDialogProps {
   agent: string;
   setAgent: (v: string) => void;
   busy: boolean;
+  disableBusy: boolean;
+  enableBusy: boolean;
   deleteBusy: boolean;
   onConfirm: () => void;
-  onRevoke: () => void;
+  onDisable: () => void;
+  onEnable: () => void;
+  onDelete: () => void;
 }
 
 export function ApiKeyEditDialog({
@@ -337,14 +342,20 @@ export function ApiKeyEditDialog({
   agent,
   setAgent,
   busy,
+  disableBusy,
+  enableBusy,
   deleteBusy,
   onConfirm,
-  onRevoke,
+  onDisable,
+  onEnable,
+  onDelete,
 }: ApiKeyEditDialogProps) {
   const { t, locale } = useI18n();
   const { user } = useAuth();
   const ak = t.settings.apiKeys;
   const { agentItems, agentSelectLabels } = useApiKeyAgentSelectItems(agents);
+  const disabled = apiKey?.revoked_at != null;
+  const actionBusy = busy || disableBusy || enableBusy || deleteBusy;
 
   return (
     <FormDialog
@@ -361,18 +372,40 @@ export function ApiKeyEditDialog({
         locale,
         user,
       )}
-      {...dialogSaveFooterProps(t.common, {
-        busy,
-        disabled: !name.trim(),
-        busyLabel: ak.updating,
-        saveLabel: ak.saveButton,
-      })}
-      onConfirm={onConfirm}
-      leadingDestructive={{
-        label: ak.revokeButton,
-        onClick: onRevoke,
-        disabled: busy || deleteBusy,
-      }}
+      {...(disabled
+        ? {
+            confirmLabel: t.common.close,
+            onConfirm: () => onOpenChange(false),
+            footerStart: (
+              <div className="flex flex-wrap items-center gap-2">
+                <FormDialogDeleteButton
+                  label={enableBusy ? ak.enabling : ak.enableButton}
+                  onClick={onEnable}
+                  disabled={actionBusy}
+                />
+                <FormDialogDeleteButton
+                  label={ak.deleteButton}
+                  onClick={onDelete}
+                  disabled={actionBusy}
+                  className="border-destructive/45 text-destructive hover:bg-destructive/10"
+                />
+              </div>
+            ),
+          }
+        : {
+            ...dialogSaveFooterProps(t.common, {
+              busy,
+              disabled: !name.trim(),
+              busyLabel: ak.updating,
+              saveLabel: ak.saveButton,
+            }),
+            onConfirm,
+            leadingDestructive: {
+              label: ak.disableButton,
+              onClick: onDisable,
+              disabled: actionBusy,
+            },
+          })}
     >
       <ApiKeyFormBody
         ak={ak}
@@ -385,26 +418,56 @@ export function ApiKeyEditDialog({
         agentItems={agentItems}
         agentSelectLabels={agentSelectLabels}
         agents={agents}
-        disabled={busy || deleteBusy}
-        nameAutoFocus={open}
+        disabled={actionBusy || disabled}
+        nameAutoFocus={open && !disabled}
       />
     </FormDialog>
   );
 }
 
-interface ApiKeyRevokeDialogProps {
+interface ApiKeyDisableDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   busy: boolean;
   onConfirm: () => void;
 }
 
-export function ApiKeyRevokeDialog({
+export function ApiKeyDisableDialog({
   open,
   onOpenChange,
   busy,
   onConfirm,
-}: ApiKeyRevokeDialogProps) {
+}: ApiKeyDisableDialogProps) {
+  const { t } = useI18n();
+  const ak = t.settings.apiKeys;
+
+  return (
+    <ConfirmDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={ak.disableTitle}
+      description={ak.disableDescription}
+      confirmLabel={busy ? ak.disabling : ak.disableButton}
+      confirmPending={busy}
+      confirmVariant="default"
+      onConfirm={onConfirm}
+    />
+  );
+}
+
+interface ApiKeyDeleteDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  busy: boolean;
+  onConfirm: () => void;
+}
+
+export function ApiKeyDeleteDialog({
+  open,
+  onOpenChange,
+  busy,
+  onConfirm,
+}: ApiKeyDeleteDialogProps) {
   const { t } = useI18n();
   const ak = t.settings.apiKeys;
 
@@ -414,7 +477,7 @@ export function ApiKeyRevokeDialog({
       onOpenChange={onOpenChange}
       title={ak.deleteTitle}
       description={ak.deleteDescription}
-      confirmLabel={busy ? ak.revoking : ak.revokeButton}
+      confirmLabel={busy ? ak.deleting : ak.deleteButton}
       confirmPending={busy}
       confirmVariant="destructive"
       onConfirm={onConfirm}

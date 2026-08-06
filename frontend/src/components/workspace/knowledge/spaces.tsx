@@ -8,7 +8,6 @@ import {
   DialogFieldGrid,
   DialogFormSection,
   DialogInputField,
-  DialogSlotField,
   FormDialog,
   NumberInput,
   dialogSaveFooterProps,
@@ -47,53 +46,58 @@ function SpaceFormFields({
   const { t } = useI18n();
 
   return (
-    <DialogFormSection title={t.knowledge.sectionBasic}>
-      <DialogFieldGrid>
-        <DialogInputField
-          label={t.knowledge.fieldName}
-          value={spaceId}
-          onChange={setSpaceId}
-          placeholder={t.knowledge.namePlaceholder}
-          disabled={disabled}
-          autoFocus={idAutoFocus}
-          autoCapitalize="none"
-          autoCorrect="off"
-        />
-        <DialogInputField
-          label={t.knowledge.fieldDescription}
-          value={description}
-          onChange={setDescription}
-          placeholder={t.knowledge.descriptionPlaceholder}
-          disabled={disabled}
-        />
-        <DialogSlotField label={t.knowledge.fieldAccess}>
+    <>
+      <DialogFormSection title={t.knowledge.sectionBasic}>
+        <DialogFieldGrid>
+          <DialogInputField
+            label={t.knowledge.fieldName}
+            value={spaceId}
+            onChange={setSpaceId}
+            placeholder={t.knowledge.namePlaceholder}
+            disabled={disabled}
+            autoFocus={idAutoFocus}
+            autoCapitalize="none"
+            autoCorrect="off"
+          />
+          <DialogInputField
+            label={t.knowledge.fieldDescription}
+            value={description}
+            onChange={setDescription}
+            placeholder={t.knowledge.descriptionPlaceholder}
+            disabled={disabled}
+          />
+          <NumberInput
+            label={t.knowledge.fieldScore}
+            value={score}
+            onChange={setScore}
+            min={0}
+            max={1}
+            step={0.01}
+            disabled={disabled}
+          />
+          <NumberInput
+            label={t.knowledge.fieldTopK}
+            value={topK}
+            onChange={setTopK}
+            min={1}
+            max={50}
+            step={1}
+            disabled={disabled}
+          />
+        </DialogFieldGrid>
+      </DialogFormSection>
+
+      <DialogFormSection title={t.knowledge.fieldAccess}>
+        <DialogFieldGrid>
           <AccessSelect
             value={access}
             onValueChange={setAccess}
             disabled={disabled}
             className="w-full"
           />
-        </DialogSlotField>
-        <NumberInput
-          label={t.knowledge.fieldTopK}
-          value={topK}
-          onChange={setTopK}
-          min={1}
-          max={50}
-          step={1}
-          disabled={disabled}
-        />
-        <NumberInput
-          label={t.knowledge.fieldScore}
-          value={score}
-          onChange={setScore}
-          min={0}
-          max={1}
-          step={0.01}
-          disabled={disabled}
-        />
-      </DialogFieldGrid>
-    </DialogFormSection>
+        </DialogFieldGrid>
+      </DialogFormSection>
+    </>
   );
 }
 

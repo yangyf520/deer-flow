@@ -52,14 +52,9 @@ test.describe("Thread list infinite scroll (issue #3482)", () => {
     });
   });
 
-  test("chats list page does NOT auto-paginate while a search filter is active", async ({
+  test("chats list auto-paginates while a search filter is active", async ({
     page,
   }) => {
-    // Count search requests via a passive request observer.  Using
-    // page.route() here would race with mockLangGraphAPI's fulfill route
-    // (Playwright matches routes in reverse registration order), so the
-    // counter could miss real requests.  page.on('request') is a pure
-    // observer and never interferes with routing.
     let searchRequestCount = 0;
     page.on("request", (request) => {
       if (request.url().includes("/api/langgraph/threads/search")) {
@@ -71,29 +66,20 @@ test.describe("Thread list infinite scroll (issue #3482)", () => {
 
     await page.goto("/workspace/chats");
 
-    // Wait for the first page to render so we have a baseline count.
     await expect(page.locator("main").getByText(FIRST_PAGE_LAST)).toBeVisible({
       timeout: 15_000,
     });
     const baselineRequests = searchRequestCount;
 
-    // Type a query that matches nothing in the first page (and nothing at
-    // all, since titles are deterministic).
     await page
       .getByPlaceholder("Search chats")
       .fill("zzz-no-such-conversation");
 
-    // The auto-sentinel must be gone; an explicit button takes its place.
-    await expect(page.getByTestId("chats-page-sentinel")).toHaveCount(0);
-    await expect(page.getByTestId("chats-page-load-more")).toBeVisible();
+    await expect(page.getByTestId("chats-page-load-more")).toHaveCount(0);
+    await expect(page.getByTestId("chats-page-sentinel")).toBeVisible();
 
-    // Give the IntersectionObserver a couple of frames to misbehave if the
-    // guard regresses.  No additional /threads/search calls should fire.
-    await page.waitForTimeout(500);
-    expect(searchRequestCount).toBe(baselineRequests);
+    await page.getByTestId("chats-page-sentinel").scrollIntoViewIfNeeded();
 
-    // The explicit button still works as an escape hatch.
-    await page.getByTestId("chats-page-load-more").click();
     await expect
       .poll(() => searchRequestCount, { timeout: 10_000 })
       .toBeGreaterThan(baselineRequests);

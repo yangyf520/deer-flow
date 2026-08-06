@@ -104,7 +104,7 @@ class ApiKeyRepository:
         return self._row_to_record(row)
 
     async def list_for_user(self, user_id: str) -> list[ApiKeyRecord]:
-        stmt = select(UserApiKeyRow).where(UserApiKeyRow.user_id == user_id, UserApiKeyRow.revoked_at.is_(None)).order_by(UserApiKeyRow.created_at.desc())
+        stmt = select(UserApiKeyRow).where(UserApiKeyRow.user_id == user_id).order_by(UserApiKeyRow.created_at.desc())
         async with self._sf() as session:
             result = await session.execute(stmt)
             return [self._row_to_record(row) for row in result.scalars()]
@@ -149,6 +149,27 @@ class ApiKeyRepository:
             row.revoked_at = datetime.now(UTC)
             await session.commit()
             return True
+
+    async def enable(self, *, user_id: str, key_id: str) -> bool:
+        async with self._sf() as session:
+            row = await session.get(UserApiKeyRow, key_id)
+            if row is None or row.user_id != user_id or row.revoked_at is None:
+                return False
+            row.revoked_at = None
+            await session.commit()
+            return True
+
+    async def delete(self, *, user_id: str, key_id: str) -> str:
+        """Return ``ok``, ``not_found``, or ``active``."""
+        async with self._sf() as session:
+            row = await session.get(UserApiKeyRow, key_id)
+            if row is None or row.user_id != user_id:
+                return "not_found"
+            if row.revoked_at is None:
+                return "active"
+            await session.delete(row)
+            await session.commit()
+            return "ok"
 
 
 def _normalize_agent_name(agent_name: str | None) -> str | None:
@@ -241,6 +262,7 @@ class ApiKeySummary(BaseModel):
     agent_name: str | None = None
     created_by_name: str | None = None
     created_at: datetime
+    revoked_at: datetime | None = None
 
 
 class ApiKeyCreateResponse(ApiKeySummary):
@@ -294,6 +316,7 @@ async def _summary(record: ApiKeyRecord) -> ApiKeySummary:
         agent_name=record.agent_name,
         created_by_name=await _creator_name_for_user(record.user_id),
         created_at=record.created_at,
+        revoked_at=record.revoked_at,
     )
 
 
@@ -372,15 +395,40 @@ def register_api_key_routes() -> APIRouter:
             raise HTTPException(status_code=404, detail="API key not found")
         return await _summary(updated)
 
-    @router.delete("/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
-    async def revoke_api_key(
+    @router.post("/{key_id}/disable", status_code=status.HTTP_204_NO_CONTENT)
+    async def disable_api_key(
         key_id: str,
         user=Depends(get_current_user_from_request),
         repo: ApiKeyRepository = Depends(get_api_key_repository),
     ) -> None:
-        revoked = await repo.revoke(user_id=str(user.id), key_id=key_id)
-        if not revoked:
+        disabled = await repo.revoke(user_id=str(user.id), key_id=key_id)
+        if not disabled:
             raise HTTPException(status_code=404, detail="API key not found")
+
+    @router.post("/{key_id}/enable", status_code=status.HTTP_204_NO_CONTENT)
+    async def enable_api_key(
+        key_id: str,
+        user=Depends(get_current_user_from_request),
+        repo: ApiKeyRepository = Depends(get_api_key_repository),
+    ) -> None:
+        enabled = await repo.enable(user_id=str(user.id), key_id=key_id)
+        if not enabled:
+            raise HTTPException(status_code=404, detail="API key not found")
+
+    @router.delete("/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
+    async def delete_api_key(
+        key_id: str,
+        user=Depends(get_current_user_from_request),
+        repo: ApiKeyRepository = Depends(get_api_key_repository),
+    ) -> None:
+        result = await repo.delete(user_id=str(user.id), key_id=key_id)
+        if result == "not_found":
+            raise HTTPException(status_code=404, detail="API key not found")
+        if result == "active":
+            raise HTTPException(
+                status_code=409,
+                detail="Disable the API key before deleting it",
+            )
 
     _routes_registered = True
     return router

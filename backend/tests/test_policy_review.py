@@ -480,6 +480,23 @@ class TestPolicyReview:
         assert finding.parties == ["legal", "security"]
         assert finding.suggestion == "补齐鉴权"
 
+        veto = parse_draft_in(
+            {
+                "summary": "摘要",
+                "findings": [
+                    {
+                        "risk": "veto",
+                        "text": "一票否决项",
+                        "quote": "原文摘录",
+                        "citation_ids": ["ev-1"],
+                        "section": "§1",
+                        "suggestion": "整改",
+                    }
+                ],
+            }
+        )
+        assert veto.dimensions[0].findings[0].risk == "high"
+
         session = {
             "sections": _source(),
             "packs": [_pack()],

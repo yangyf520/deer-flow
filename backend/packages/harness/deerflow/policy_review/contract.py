@@ -195,6 +195,9 @@ class FindingIn(BaseModel):
     def normalize_finding(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
+        coerced_risk = coerce_risk_level(data.get("risk"))
+        if coerced_risk is not None:
+            data["risk"] = coerced_risk
         # Flat quote → nested evidence (models often skip the wrapper).
         evidence = data.get("evidence")
         if not isinstance(evidence, dict):
@@ -330,6 +333,31 @@ def parse_draft(data: dict[str, Any]) -> tuple[LegalReviewDraft | None, list[str
 
 
 RISK_ORDER: dict[str, int] = {"high": 3, "medium": 2, "low": 1, "none": 0}
+
+# Models sometimes emit scoring / colloquial labels instead of legal-review.v1 risk levels.
+RISK_ALIASES: dict[str, RiskLevel] = {
+    "veto": "high",
+    "critical": "high",
+    "severe": "high",
+    "blocker": "high",
+    "moderate": "medium",
+    "minor": "low",
+    "info": "none",
+    "informational": "none",
+    "高": "high",
+    "中": "medium",
+    "低": "low",
+    "无": "none",
+}
+
+
+def coerce_risk_level(raw: Any) -> RiskLevel | None:
+    if not isinstance(raw, str):
+        return None
+    key = raw.strip().lower()
+    if key in RISK_ORDER:
+        return key  # type: ignore[return-value]
+    return RISK_ALIASES.get(key) or RISK_ALIASES.get(raw.strip())
 
 
 def max_risk(levels: list[str]) -> RiskLevel:

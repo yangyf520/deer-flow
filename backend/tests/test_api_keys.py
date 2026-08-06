@@ -71,15 +71,69 @@ async def test_create_and_authenticate_api_key(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_revoke_api_key(tmp_path):
+async def test_disable_api_key(tmp_path):
     sf, user = await _setup_db(tmp_path)
     try:
         repo = ApiKeyRepository(sf)
         created = await create_api_key(repo, user_id=str(user.id), name="temp")
         assert await authenticate_api_key(repo, created.key) is not None
-        revoked = await repo.revoke(user_id=str(user.id), key_id=created.id)
-        assert revoked is True
+        disabled = await repo.revoke(user_id=str(user.id), key_id=created.id)
+        assert disabled is True
         assert await authenticate_api_key(repo, created.key) is None
+    finally:
+        await close_engine()
+
+
+@pytest.mark.asyncio
+async def test_enable_api_key(tmp_path):
+    sf, user = await _setup_db(tmp_path)
+    try:
+        repo = ApiKeyRepository(sf)
+        created = await create_api_key(repo, user_id=str(user.id), name="temp")
+        assert await repo.revoke(user_id=str(user.id), key_id=created.id) is True
+        assert await authenticate_api_key(repo, created.key) is None
+        assert await repo.enable(user_id=str(user.id), key_id=created.id) is True
+        assert await authenticate_api_key(repo, created.key) is not None
+    finally:
+        await close_engine()
+
+
+@pytest.mark.asyncio
+async def test_delete_disabled_api_key(tmp_path):
+    sf, user = await _setup_db(tmp_path)
+    try:
+        repo = ApiKeyRepository(sf)
+        created = await create_api_key(repo, user_id=str(user.id), name="temp")
+        assert await repo.revoke(user_id=str(user.id), key_id=created.id) is True
+        assert await repo.delete(user_id=str(user.id), key_id=created.id) == "ok"
+        keys = await repo.list_for_user(str(user.id))
+        assert keys == []
+    finally:
+        await close_engine()
+
+
+@pytest.mark.asyncio
+async def test_delete_active_api_key_rejected(tmp_path):
+    sf, user = await _setup_db(tmp_path)
+    try:
+        repo = ApiKeyRepository(sf)
+        created = await create_api_key(repo, user_id=str(user.id), name="temp")
+        assert await repo.delete(user_id=str(user.id), key_id=created.id) == "active"
+    finally:
+        await close_engine()
+
+
+@pytest.mark.asyncio
+async def test_list_includes_disabled_keys(tmp_path):
+    sf, user = await _setup_db(tmp_path)
+    try:
+        repo = ApiKeyRepository(sf)
+        created = await create_api_key(repo, user_id=str(user.id), name="temp")
+        assert await repo.revoke(user_id=str(user.id), key_id=created.id) is True
+        keys = await repo.list_for_user(str(user.id))
+        assert len(keys) == 1
+        assert keys[0].id == created.id
+        assert keys[0].revoked_at is not None
     finally:
         await close_engine()
 

@@ -7,18 +7,20 @@ import {
   SettingsIcon,
   ShieldCheckIcon,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 
 import {
   CardAction,
   ItemCard,
-  ItemCardBadge,
-  itemMetaTags,
+  ItemRowStatusBadge,
+  MetaPill,
 } from "@/components/component";
 import { useI18n } from "@/core/i18n/hooks";
 import {
+  accessHint,
   accessLabel,
   boundScenarioType,
+  scenarioLabel,
   spaceCardSubtitle,
   spaceCardTitle,
   type Space,
@@ -43,10 +45,37 @@ export function SpaceCard({ space, onEdit }: SpaceCardProps) {
   const subtitle = spaceCardSubtitle(space, title);
 
   const metaTags = useMemo(() => {
-    return itemMetaTags([
-      { key: "access", label: accessLabel(space.access, kb) },
-    ]);
-  }, [kb, space.access]);
+    const tags: ReactNode[] = [];
+
+    if (!bound) {
+      tags.push(
+        <ItemRowStatusBadge key="bind" tone="warning">
+          {kb.unbound}
+        </ItemRowStatusBadge>,
+      );
+    } else {
+      tags.push(
+        <ItemRowStatusBadge
+          key="scenario"
+          tone="success"
+          className="font-mono"
+          title={bound}
+        >
+          {scenarioLabel(bound, kb)}
+        </ItemRowStatusBadge>,
+      );
+    }
+
+    const access = accessLabel(space.access, kb);
+    const accessDetail = accessHint(space.access, kb);
+    tags.push(
+      <MetaPill key="access" size="row" hint={accessDetail ?? undefined}>
+        {access}
+      </MetaPill>,
+    );
+
+    return tags;
+  }, [bound, kb, space.access]);
 
   return (
     <ItemCard
@@ -56,11 +85,6 @@ export function SpaceCard({ space, onEdit }: SpaceCardProps) {
       description={subtitle}
       metaTags={metaTags}
       href={href}
-      badges={
-        !bound ? (
-          <ItemCardBadge variant="destructive">{kb.unbound}</ItemCardBadge>
-        ) : undefined
-      }
       actions={
         <div
           className={cn(

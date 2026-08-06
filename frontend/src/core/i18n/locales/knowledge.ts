@@ -105,6 +105,10 @@ export type KnowledgeTranslations = {
   reindexing: string;
   reindexTooltip: string;
   deleteTooltip: string;
+  deleteAllButton: string;
+  deleteAllTitle: string;
+  deleteAllDescription: (count: number) => string;
+  deleteAllSuccess: string;
   stopProcessingTooltip: string;
   deleting: string;
   fieldKind: string;
@@ -297,6 +301,11 @@ export const knowledgeEnUS: KnowledgeTranslations = {
   reindexing: "Rebuilding…",
   reindexTooltip: "Re-run parsing and embedding",
   deleteTooltip: "Delete document",
+  deleteAllButton: "Delete all",
+  deleteAllTitle: "Delete all documents",
+  deleteAllDescription: (count) =>
+    `Permanently delete all ${count} documents in this space. This cannot be undone.`,
+  deleteAllSuccess: "All documents deleted",
   stopProcessingTooltip: "Stop processing and delete",
   deleting: "Deleting…",
   fieldKind: "Document kind",
@@ -532,6 +541,11 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   reindexing: "重建中…",
   reindexTooltip: "重新解析并嵌入",
   deleteTooltip: "删除文档",
+  deleteAllButton: "删除全部",
+  deleteAllTitle: "删除全部文档",
+  deleteAllDescription: (count) =>
+    `将永久删除此知识库中的全部 ${count} 个文档，且无法恢复。`,
+  deleteAllSuccess: "已全部删除",
   stopProcessingTooltip: "停止处理并删除",
   deleting: "删除中…",
   fieldKind: "知识分类",

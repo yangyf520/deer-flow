@@ -1214,6 +1214,48 @@ async def delete_document(
         ) from exc
 
 
+async def delete_all_documents(
+    session: AsyncSession,
+    *,
+    space_id: str,
+) -> int:
+    """Delete every document in a space (vectors best-effort, then DB rows)."""
+    from fastapi import HTTPException
+
+    result = await session.execute(select(KnowledgeDocumentRow).where(KnowledgeDocumentRow.space_id == space_id))
+    docs = list(result.scalars().all())
+    if not docs:
+        return 0
+
+    for row in docs:
+        try:
+            await asyncio.to_thread(
+                delete_document_vectors,
+                space_id=space_id,
+                doc_id=row.id,
+            )
+        except Exception as exc:
+            logger.exception(
+                "vector delete failed for %s (continuing with DB delete): %s",
+                row.id,
+                exc,
+            )
+
+    try:
+        for row in docs:
+            await session.delete(row)
+        await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        logger.exception("bulk document delete failed for space %s", space_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete documents. {exc}",
+        ) from exc
+
+    return len(docs)
+
+
 async def delete_space(
     session: AsyncSession,
     *,

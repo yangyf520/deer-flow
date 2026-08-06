@@ -15,21 +15,27 @@ import {
   PanelEmpty,
   Shell,
   ShellHeader,
+  formatApiKeyPrefixDisplay,
 } from "@/components/component";
 import { workspacePageInsetXClass } from "@/components/component/styles";
 import {
   ApiKeyCard,
   ApiKeyCreateDialog,
   ApiKeyCreatedDialog,
+  ApiKeyDeleteDialog,
+  ApiKeyDisableDialog,
   ApiKeyEditDialog,
-  ApiKeyRevokeDialog,
   NO_AGENT,
   agentSelectValue,
 } from "@/components/workspace/api-keys";
 import { useAgents } from "@/core/agents";
 import {
   createApiKey,
-  revokeApiKey,
+  deleteApiKey,
+  disableApiKey,
+  enableApiKey,
+  isApiKeyDisabled,
+  rememberApiKeyMaskedDisplay,
   updateApiKey,
   useApiKeys,
   type AgentOption,
@@ -64,8 +70,11 @@ export default function ApiKeysPage() {
   const [editDescription, setEditDescription] = useState("");
   const [editAgent, setEditAgent] = useState(NO_AGENT);
   const [editBusy, setEditBusy] = useState(false);
+  const [disabling, setDisabling] = useState<ApiKeySummary | null>(null);
+  const [disableBusy, setDisableBusy] = useState(false);
   const [deleting, setDeleting] = useState<ApiKeySummary | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [enableBusy, setEnableBusy] = useState(false);
   const [query, setQuery] = useState("");
 
   const q = query.trim().toLowerCase();
@@ -139,6 +148,10 @@ export default function ApiKeysPage() {
       setCreateOpen(false);
       resetCreateForm();
       setCreatedKey(created.key);
+      rememberApiKeyMaskedDisplay(
+        created.id,
+        formatApiKeyPrefixDisplay(created.key),
+      );
       await invalidateKeys();
     } catch (e) {
       setActionError(e instanceof Error ? e.message : ak.createError);
@@ -155,7 +168,7 @@ export default function ApiKeysPage() {
   }
 
   async function onSaveEdit() {
-    if (!editing || !editName.trim()) {
+    if (!editing || !editName.trim() || isApiKeyDisabled(editing)) {
       return;
     }
     setEditBusy(true);
@@ -176,6 +189,43 @@ export default function ApiKeysPage() {
     }
   }
 
+  async function onConfirmDisable() {
+    if (!disabling) {
+      return;
+    }
+    setDisableBusy(true);
+    setActionError(null);
+    try {
+      await disableApiKey(disabling.id);
+      setDisabling(null);
+      setEditing(null);
+      toast.success(ak.disableSuccess);
+      await invalidateKeys();
+    } catch {
+      setActionError(ak.disableError);
+    } finally {
+      setDisableBusy(false);
+    }
+  }
+
+  async function onEnable() {
+    if (!editing) {
+      return;
+    }
+    setEnableBusy(true);
+    setActionError(null);
+    try {
+      await enableApiKey(editing.id);
+      setEditing(null);
+      toast.success(ak.enableSuccess);
+      await invalidateKeys();
+    } catch {
+      setActionError(ak.enableError);
+    } finally {
+      setEnableBusy(false);
+    }
+  }
+
   async function onConfirmDelete() {
     if (!deleting) {
       return;
@@ -183,13 +233,13 @@ export default function ApiKeysPage() {
     setDeleteBusy(true);
     setActionError(null);
     try {
-      await revokeApiKey(deleting.id);
+      await deleteApiKey(deleting.id);
       setDeleting(null);
       setEditing(null);
-      toast.success(ak.revokeSuccess);
+      toast.success(ak.deleteSuccess);
       await invalidateKeys();
     } catch {
-      setActionError(ak.revokeError);
+      setActionError(ak.deleteError);
     } finally {
       setDeleteBusy(false);
     }
@@ -296,12 +346,23 @@ export default function ApiKeysPage() {
         agent={editAgent}
         setAgent={setEditAgent}
         busy={editBusy}
+        disableBusy={disableBusy}
+        enableBusy={enableBusy}
         deleteBusy={deleteBusy}
         onConfirm={() => void onSaveEdit()}
-        onRevoke={() => editing && setDeleting(editing)}
+        onDisable={() => editing && setDisabling(editing)}
+        onEnable={() => void onEnable()}
+        onDelete={() => editing && setDeleting(editing)}
       />
 
-      <ApiKeyRevokeDialog
+      <ApiKeyDisableDialog
+        open={Boolean(disabling)}
+        onOpenChange={(open) => !open && setDisabling(null)}
+        busy={disableBusy}
+        onConfirm={() => void onConfirmDisable()}
+      />
+
+      <ApiKeyDeleteDialog
         open={Boolean(deleting)}
         onOpenChange={(open) => !open && setDeleting(null)}
         busy={deleteBusy}

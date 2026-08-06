@@ -415,6 +415,15 @@ export async function deleteDocument(
   await readJson(res, "Failed to delete document");
 }
 
+export async function deleteAllDocuments(spaceId: string): Promise<void> {
+  const res = await fetch(
+    `${base()}/spaces/${encodeURIComponent(spaceId)}/documents`,
+    { method: "DELETE" },
+  );
+  if (res.status === 204 || res.ok) return;
+  await readJson(res, "Failed to delete all documents");
+}
+
 export async function reindexDocument(
   spaceId: string,
   docId: string,

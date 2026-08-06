@@ -21,10 +21,20 @@ export type ApiKeysTranslations = {
   updating: string;
   updateSuccess: string;
   updateError: string;
-  revokeButton: string;
-  revoking: string;
-  revokeSuccess: string;
-  revokeError: string;
+  disableButton: string;
+  disabling: string;
+  disableSuccess: string;
+  disableError: string;
+  disableTitle: string;
+  disableDescription: string;
+  enableButton: string;
+  enabling: string;
+  enableSuccess: string;
+  enableError: string;
+  deleteButton: string;
+  deleting: string;
+  deleteSuccess: string;
+  deleteError: string;
   deleteTitle: string;
   deleteDescription: string;
   loadError: string;
@@ -63,13 +73,24 @@ export const apiKeysEnUS: ApiKeysTranslations = {
   updating: "Saving…",
   updateSuccess: "API key updated",
   updateError: "Failed to update API key",
-  revokeButton: "Revoke",
-  revoking: "Revoking…",
-  revokeSuccess: "API key revoked",
-  revokeError: "Failed to revoke API key",
-  deleteTitle: "Revoke API key",
+  disableButton: "Disable",
+  disabling: "Disabling…",
+  disableSuccess: "API key disabled",
+  disableError: "Failed to disable API key",
+  disableTitle: "Disable API key",
+  disableDescription:
+    "This key will stop working immediately. You can re-enable it later.",
+  enableButton: "Enable",
+  enabling: "Enabling…",
+  enableSuccess: "API key enabled",
+  enableError: "Failed to enable API key",
+  deleteButton: "Delete",
+  deleting: "Deleting…",
+  deleteSuccess: "API key deleted",
+  deleteError: "Failed to delete API key",
+  deleteTitle: "Delete API key",
   deleteDescription:
-    "This key will stop working immediately. This action cannot be undone.",
+    "This permanently removes the key record. This action cannot be undone.",
   loadError: "Failed to load API keys",
   fieldName: "Name",
   namePlaceholder: "e.g. CI pipeline",
@@ -105,12 +126,22 @@ export const apiKeysZhCN: ApiKeysTranslations = {
   updating: "保存中…",
   updateSuccess: "API 密钥已更新",
   updateError: "更新 API 密钥失败",
-  revokeButton: "吊销",
-  revoking: "吊销中…",
-  revokeSuccess: "API 密钥已吊销",
-  revokeError: "吊销 API 密钥失败",
-  deleteTitle: "吊销 API 密钥",
-  deleteDescription: "此密钥将立即失效，且无法撤销。",
+  disableButton: "禁用",
+  disabling: "禁用中…",
+  disableSuccess: "API 密钥已禁用",
+  disableError: "禁用 API 密钥失败",
+  disableTitle: "禁用 API 密钥",
+  disableDescription: "此密钥将立即失效，之后可以重新启用。",
+  enableButton: "启用",
+  enabling: "启用中…",
+  enableSuccess: "API 密钥已启用",
+  enableError: "启用 API 密钥失败",
+  deleteButton: "删除",
+  deleting: "删除中…",
+  deleteSuccess: "API 密钥已删除",
+  deleteError: "删除 API 密钥失败",
+  deleteTitle: "删除 API 密钥",
+  deleteDescription: "将永久删除此密钥记录，且无法恢复。",
   loadError: "加载 API 密钥失败",
   fieldName: "名称",
   namePlaceholder: "例如：CI 流水线",

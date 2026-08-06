@@ -6,15 +6,16 @@ import { useEffect, useState } from "react";
 import {
   AlertError,
   FormField,
+  ItemRowStatusBadge,
   ResourceList,
   ResourceRow,
   Section,
   Shell,
   ShellHeader,
   SplitView,
+  itemRowStatusToneFromValue,
 } from "@/components/component";
 import { panelClass } from "@/components/component/styles";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -53,10 +54,7 @@ import {
   useThreadScheduledTasks,
 } from "@/core/scheduled-tasks/hooks";
 import { RECIPES, type Recipe } from "@/core/scheduled-tasks/recipes";
-import type {
-  ScheduledTask,
-  ScheduledTaskRun,
-} from "@/core/scheduled-tasks/types";
+import type { ScheduledTask } from "@/core/scheduled-tasks/types";
 import { cn } from "@/lib/utils";
 
 const NONE = "—";
@@ -152,8 +150,6 @@ export default function ScheduledTasksPage() {
     (st.runStatus as Record<string, string>)[v] ?? v;
   const taskSummary = (task: ScheduledTask) =>
     `${scheduleTypeLabel(task.schedule_type)} · ${statusLabel(task.status)}`;
-  const runSummary = (run: ScheduledTaskRun) =>
-    `${runTriggerLabel(run.trigger)} · ${runStatusLabel(run.status)}`;
   const applyRecipe = (recipe: Recipe) => {
     const labels = st.recipes[recipe.titleKey];
     setTitle(labels.title);
@@ -456,9 +452,12 @@ export default function ScheduledTasksPage() {
                       <h2 className="text-base font-semibold">
                         {selectedTask.title}
                       </h2>
-                      <Badge variant="outline" className="mt-1 font-normal">
+                      <ItemRowStatusBadge
+                        className="mt-1"
+                        tone={itemRowStatusToneFromValue(selectedTask.status)}
+                      >
                         {statusLabel(selectedTask.status)}
-                      </Badge>
+                      </ItemRowStatusBadge>
                     </div>
                     <Button
                       variant="outline"
@@ -617,7 +616,14 @@ export default function ScheduledTasksPage() {
                             key={run.id}
                             className="bg-muted/40 rounded-md border p-2.5 text-sm"
                           >
-                            <div className="font-medium">{runSummary(run)}</div>
+                            <div className="flex flex-wrap items-center gap-2 font-medium">
+                              <span>{runTriggerLabel(run.trigger)}</span>
+                              <ItemRowStatusBadge
+                                tone={itemRowStatusToneFromValue(run.status)}
+                              >
+                                {runStatusLabel(run.status)}
+                              </ItemRowStatusBadge>
+                            </div>
                             <div className="text-muted-foreground text-xs">
                               {run.run_id ?? NONE}
                             </div>

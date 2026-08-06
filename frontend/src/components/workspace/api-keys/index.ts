@@ -1,8 +1,9 @@
 export {
   ApiKeyCreateDialog,
   ApiKeyCreatedDialog,
+  ApiKeyDeleteDialog,
+  ApiKeyDisableDialog,
   ApiKeyEditDialog,
-  ApiKeyRevokeDialog,
   NO_AGENT,
   agentSelectValue,
 } from "./api-keys";
