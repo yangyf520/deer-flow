@@ -1,5 +1,6 @@
 export {
   ApiKeyCreateDialog,
+  ApiKeyCreatedDialog,
   ApiKeyEditDialog,
   ApiKeyRevokeDialog,
   NO_AGENT,

@@ -1,3 +1,5 @@
+import { useQuery } from "@tanstack/react-query";
+
 import { fetch, getCsrfHeaders } from "@/core/api/fetcher";
 
 export type ApiKeySummary = {
@@ -88,4 +90,17 @@ export async function revokeApiKey(keyId: string): Promise<void> {
   if (!res.ok) {
     throw new Error("Failed to revoke API key");
   }
+}
+
+export function useApiKeys() {
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ["api-keys"],
+    queryFn: listApiKeys,
+  });
+  return {
+    keys: data ?? [],
+    isLoading,
+    error,
+    refetch,
+  };
 }

@@ -3,40 +3,68 @@
 import { KeyIcon, SettingsIcon } from "lucide-react";
 import { useMemo } from "react";
 
-import { CardAction, ItemCard, itemMetaTags } from "@/components/component";
-import type { ApiKeySummary } from "@/core/api-keys";
+import {
+  CardAction,
+  ItemCard,
+  itemMetaTags,
+  maskMiddle,
+} from "@/components/component";
+import type { AgentOption, ApiKeySummary } from "@/core/api-keys";
 import { useI18n } from "@/core/i18n/hooks";
 
-function agentBindingLabel(
+const API_KEY_PREFIX = "dfk_";
+
+function agentBindingMeta(
   agentName: string | null,
+  agents: AgentOption[],
   labels: { unboundAgent: string; leadAgent: string },
-): string {
-  if (!agentName) return labels.unboundAgent;
-  if (agentName === "lead_agent") return labels.leadAgent;
-  return agentName;
+): { label: string; hint?: string } {
+  if (!agentName) {
+    return { label: labels.unboundAgent };
+  }
+  if (agentName === "lead_agent") {
+    return { label: labels.leadAgent, hint: agentName };
+  }
+  const description = agents
+    .find((item) => item.name === agentName)
+    ?.description?.trim();
+  return {
+    label: agentName,
+    ...(description ? { hint: description } : {}),
+  };
 }
 
 interface ApiKeyCardProps {
   apiKey: ApiKeySummary;
+  agents: AgentOption[];
   onEdit?: (key: ApiKeySummary) => void;
 }
 
-export function ApiKeyCard({ apiKey, onEdit }: ApiKeyCardProps) {
+export function ApiKeyCard({ apiKey, agents, onEdit }: ApiKeyCardProps) {
   const { t } = useI18n();
   const ak = t.settings.apiKeys;
 
   const metaTags = useMemo(() => {
+    const agentMeta = agentBindingMeta(apiKey.agent_name, agents, {
+      unboundAgent: ak.unboundAgent,
+      leadAgent: ak.leadAgent,
+    });
+    const prefixMeta = maskMiddle(apiKey.prefix, {
+      leadingPrefix: API_KEY_PREFIX,
+    });
     return itemMetaTags([
       {
         key: "agent",
-        label: agentBindingLabel(apiKey.agent_name, {
-          unboundAgent: ak.unboundAgent,
-          leadAgent: ak.leadAgent,
-        }),
+        label: agentMeta.label,
+        hint: agentMeta.hint,
       },
-      { key: "prefix", label: apiKey.prefix },
+      {
+        key: "prefix",
+        label: prefixMeta,
+        className: "whitespace-nowrap",
+      },
     ]);
-  }, [ak.leadAgent, ak.unboundAgent, apiKey]);
+  }, [agents, ak.leadAgent, ak.unboundAgent, apiKey]);
 
   return (
     <ItemCard

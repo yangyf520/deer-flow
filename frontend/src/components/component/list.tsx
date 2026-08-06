@@ -61,7 +61,7 @@ export function ItemListPanel({
     >
       <div
         className={cn(
-          "border-border/50 flex shrink-0 items-center justify-between gap-3 border-b py-2",
+          "border-border/50 flex min-h-11 shrink-0 items-center justify-between gap-3 border-b py-2",
           workspacePageInsetXClass,
         )}
       >

@@ -54,6 +54,7 @@ export {
   ItemGrid,
   itemGridClass,
   itemMetaTags,
+  maskMiddle,
   formatWorkspaceItemTimestamp,
   MetaPill,
   ItemRowStatusBadge,

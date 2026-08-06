@@ -54,6 +54,34 @@ export const itemRowStatusToneClass: Record<ItemRowStatusTone, string> = {
     "border-border/50 bg-muted/25 text-muted-foreground dark:text-muted-foreground",
 };
 
+/** Mask sensitive strings as `{prefix}{start}*{end}` (e.g. tokens, key prefixes). */
+export function maskMiddle(
+  value: string,
+  {
+    start = 7,
+    end = 8,
+    mask = "*",
+    leadingPrefix = "",
+  }: {
+    start?: number;
+    end?: number;
+    mask?: string;
+    leadingPrefix?: string;
+  } = {},
+): string {
+  if (mask.length > 0 && value.includes(mask)) {
+    return value;
+  }
+  const normalized = value.endsWith("…") ? value.slice(0, -1) : value;
+  const prefix =
+    leadingPrefix && normalized.startsWith(leadingPrefix) ? leadingPrefix : "";
+  const body = prefix ? normalized.slice(prefix.length) : normalized;
+  if (body.length <= start || body.length <= start + end) {
+    return normalized;
+  }
+  return `${prefix}${body.slice(0, start)}${mask}${body.slice(-end)}`;
+}
+
 export function ItemRowStatusBadge({
   className,
   variant = "outline",
@@ -177,10 +205,15 @@ export function ItemCardBadge({
 }
 
 export function itemMetaTags(
-  items: Array<{ key: string; label: ReactNode }>,
+  items: Array<{
+    key: string;
+    label: ReactNode;
+    hint?: string;
+    className?: string;
+  }>,
 ): ReactNode[] {
-  return items.map(({ key, label }) => (
-    <MetaPill key={key} mono>
+  return items.map(({ key, label, hint, className }) => (
+    <MetaPill key={key} mono hint={hint} className={className}>
       {label}
     </MetaPill>
   ));

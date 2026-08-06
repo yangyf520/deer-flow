@@ -16,7 +16,7 @@ from app.gateway.auth.password import hash_password, verify_password
 from deerflow.persistence.user.api_key_model import UserApiKeyRow
 
 API_KEY_PREFIX = "dfk_"
-_PREFIX_DISPLAY_LEN = 8
+_PREFIX_DISPLAY_LEN = 12
 _UNSET = object()
 
 router = APIRouter(prefix="/api/v1/auth/api-keys", tags=["api-keys"])
@@ -285,12 +285,12 @@ async def _creator_name_for_user(user_id: str) -> str | None:
     return _creator_display_name(user.email)
 
 
-async def _summary(record: ApiKeyRecord, *, display_prefix: str) -> ApiKeySummary:
+async def _summary(record: ApiKeyRecord) -> ApiKeySummary:
     return ApiKeySummary(
         id=record.id,
         name=record.name,
         description=record.description,
-        prefix=display_prefix,
+        prefix=f"{API_KEY_PREFIX}{record.prefix}",
         agent_name=record.agent_name,
         created_by_name=await _creator_name_for_user(record.user_id),
         created_at=record.created_at,
@@ -314,7 +314,7 @@ def register_api_key_routes() -> APIRouter:
         repo: ApiKeyRepository = Depends(get_api_key_repository),
     ) -> ApiKeyListResponse:
         records = await repo.list_for_user(str(user.id))
-        keys = [await _summary(record, display_prefix=f"dfk_{record.prefix}…") for record in records]
+        keys = [await _summary(record) for record in records]
         return ApiKeyListResponse(keys=keys)
 
     @router.post("", response_model=ApiKeyCreateResponse, status_code=status.HTTP_201_CREATED)
@@ -370,7 +370,7 @@ def register_api_key_routes() -> APIRouter:
         )
         if updated is None:
             raise HTTPException(status_code=404, detail="API key not found")
-        return await _summary(updated, display_prefix=f"dfk_{updated.prefix}…")
+        return await _summary(updated)
 
     @router.delete("/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def revoke_api_key(

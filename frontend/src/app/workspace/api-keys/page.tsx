@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -19,17 +20,18 @@ import { workspacePageInsetXClass } from "@/components/component/styles";
 import {
   ApiKeyCard,
   ApiKeyCreateDialog,
+  ApiKeyCreatedDialog,
   ApiKeyEditDialog,
   ApiKeyRevokeDialog,
   NO_AGENT,
   agentSelectValue,
 } from "@/components/workspace/api-keys";
+import { useAgents } from "@/core/agents";
 import {
   createApiKey,
-  listAgentOptions,
-  listApiKeys,
   revokeApiKey,
   updateApiKey,
+  useApiKeys,
   type AgentOption,
   type ApiKeySummary,
 } from "@/core/api-keys";
@@ -39,10 +41,18 @@ import { cn } from "@/lib/utils";
 export default function ApiKeysPage() {
   const { t } = useI18n();
   const ak = t.settings.apiKeys;
-  const [keys, setKeys] = useState<ApiKeySummary[]>([]);
-  const [agents, setAgents] = useState<AgentOption[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const { keys, isLoading, error: loadError } = useApiKeys();
+  const { agents: agentRecords } = useAgents();
+  const agents = useMemo<AgentOption[]>(
+    () =>
+      agentRecords.map((agent) => ({
+        name: agent.name,
+        description: agent.description || undefined,
+      })),
+    [agentRecords],
+  );
+  const [actionError, setActionError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [createDescription, setCreateDescription] = useState("");
@@ -70,44 +80,39 @@ export default function ApiKeysPage() {
         (key.created_by_name?.toLowerCase().includes(q) ?? false) ||
         key.prefix.toLowerCase().includes(q) ||
         (key.agent_name?.toLowerCase().includes(q) ?? false) ||
-        (!key.agent_name && ak.unboundAgent.toLowerCase().includes(q)),
+        (!key.agent_name && ak.unboundAgent.toLowerCase().includes(q)) ||
+        agents.some(
+          (agent) =>
+            agent.name === key.agent_name &&
+            (agent.description?.toLowerCase().includes(q) ?? false),
+        ),
     );
-  }, [ak.unboundAgent, keys, q]);
+  }, [agents, ak.unboundAgent, keys, q]);
 
-  const isListEmpty = !loading && keys.length === 0;
+  const listError =
+    loadError instanceof Error
+      ? loadError.message
+      : loadError
+        ? ak.loadError
+        : actionError;
+
+  const isListEmpty = !isLoading && keys.length === 0;
 
   const countLabel = useMemo(() => {
-    if (loading || keys.length === 0) return undefined;
+    if (isLoading) return undefined;
+    if (keys.length === 0) return undefined;
     if (q) return ak.countFiltered(filteredKeys.length, keys.length);
     return ak.countTotal(keys.length);
-  }, [ak, filteredKeys.length, keys.length, loading, q]);
+  }, [ak, filteredKeys.length, isLoading, keys.length, q]);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [keyList, agentList] = await Promise.all([
-        listApiKeys(),
-        listAgentOptions(),
-      ]);
-      setKeys(keyList);
-      setAgents(agentList);
-      setError(null);
-    } catch {
-      setError(ak.loadError);
-    } finally {
-      setLoading(false);
-    }
-  }, [ak.loadError]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+  async function invalidateKeys() {
+    await queryClient.invalidateQueries({ queryKey: ["api-keys"] });
+  }
 
   function resetCreateForm() {
     setCreateName("");
     setCreateDescription("");
     setCreateAgent(NO_AGENT);
-    setCreatedKey(null);
   }
 
   function onCloseCreate() {
@@ -115,26 +120,28 @@ export default function ApiKeysPage() {
     resetCreateForm();
   }
 
+  function onCloseCreated() {
+    setCreatedKey(null);
+  }
+
   async function onCreate() {
     if (!createName.trim()) {
       return;
     }
     setCreateBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       const created = await createApiKey({
         name: createName.trim(),
         description: createDescription.trim() || null,
         agent_name: createAgent === NO_AGENT ? null : createAgent,
       });
+      setCreateOpen(false);
+      resetCreateForm();
       setCreatedKey(created.key);
-      setCreateName("");
-      setCreateDescription("");
-      setCreateAgent(NO_AGENT);
-      toast.success(ak.createButton);
-      await reload();
+      await invalidateKeys();
     } catch (e) {
-      setError(e instanceof Error ? e.message : ak.createError);
+      setActionError(e instanceof Error ? e.message : ak.createError);
     } finally {
       setCreateBusy(false);
     }
@@ -152,7 +159,7 @@ export default function ApiKeysPage() {
       return;
     }
     setEditBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       await updateApiKey(editing.id, {
         name: editName.trim(),
@@ -161,9 +168,9 @@ export default function ApiKeysPage() {
       });
       setEditing(null);
       toast.success(ak.updateSuccess);
-      await reload();
+      await invalidateKeys();
     } catch (e) {
-      setError(e instanceof Error ? e.message : ak.updateError);
+      setActionError(e instanceof Error ? e.message : ak.updateError);
     } finally {
       setEditBusy(false);
     }
@@ -174,15 +181,15 @@ export default function ApiKeysPage() {
       return;
     }
     setDeleteBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       await revokeApiKey(deleting.id);
       setDeleting(null);
       setEditing(null);
       toast.success(ak.revokeSuccess);
-      await reload();
+      await invalidateKeys();
     } catch {
-      setError(ak.revokeError);
+      setActionError(ak.revokeError);
     } finally {
       setDeleteBusy(false);
     }
@@ -204,13 +211,13 @@ export default function ApiKeysPage() {
           />
         }
       >
-        {error ? <AlertError>{error}</AlertError> : null}
+        {listError ? <AlertError>{listError}</AlertError> : null}
 
         <ItemListPanel
           title={ak.listTitle}
           countLabel={countLabel}
           toolbar={
-            !loading && !isListEmpty ? (
+            !isListEmpty ? (
               <ListPanelToolbar>
                 <ListSearchField
                   value={query}
@@ -221,7 +228,7 @@ export default function ApiKeysPage() {
             ) : undefined
           }
         >
-          {loading ? (
+          {isLoading ? (
             <PanelEmpty className="py-16">{t.common.loading}</PanelEmpty>
           ) : isListEmpty ? (
             <PanelEmpty className="py-16">
@@ -236,7 +243,12 @@ export default function ApiKeysPage() {
             <div className={cn(workspacePageInsetXClass, "pt-2 pb-3")}>
               <ItemGrid density="dense">
                 {filteredKeys.map((key) => (
-                  <ApiKeyCard key={key.id} apiKey={key} onEdit={openEdit} />
+                  <ApiKeyCard
+                    key={key.id}
+                    apiKey={key}
+                    agents={agents}
+                    onEdit={openEdit}
+                  />
                 ))}
               </ItemGrid>
             </div>
@@ -255,10 +267,22 @@ export default function ApiKeysPage() {
         agent={createAgent}
         setAgent={setCreateAgent}
         busy={createBusy}
-        createdKey={createdKey}
         onConfirm={() => void onCreate()}
         onClose={onCloseCreate}
       />
+
+      {createdKey ? (
+        <ApiKeyCreatedDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              onCloseCreated();
+            }
+          }}
+          createdKey={createdKey}
+          onClose={onCloseCreated}
+        />
+      ) : null}
 
       <ApiKeyEditDialog
         open={Boolean(editing)}
