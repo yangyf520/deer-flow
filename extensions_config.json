@@ -5,7 +5,7 @@
       "type": "http",
       "url": "$MCP_SERVER_EHR",
       "headers": {
-        "X-API-Key": "$MCP_API_KEY_EHR"
+        "X-API-Key": "5d9651cfd6650f7378cdf3f15f4753be083c089defb3303b8c878ab8f2604da2"
       },
       "description": "只读公开招聘职位搜索与职位详情",
       "tool_name_prefix": true,
