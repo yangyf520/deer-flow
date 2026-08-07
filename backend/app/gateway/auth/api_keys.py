@@ -278,14 +278,16 @@ async def _agent_exists_for_user(user_id: str, agent_name: str) -> bool:
 
     from deerflow.persistence.agents import get_agent_store
 
-    normalized = agent_name.strip().lower().replace("_", "-")
+    normalized = _normalize_agent_name(agent_name)
+    if normalized is None:
+        return False
     return await asyncio.to_thread(get_agent_store().exists, normalized, user_id=user_id)
 
 
 async def _normalize_agent_name_for_user(user_id: str, agent_name: str | None) -> str | None:
-    if agent_name is None:
+    normalized = _normalize_agent_name(agent_name)
+    if normalized is None:
         return None
-    normalized = agent_name.strip().lower().replace("_", "-")
     if normalized in {"lead-agent", "lead_agent"}:
         return "lead_agent"
     if not await _agent_exists_for_user(user_id, normalized):
