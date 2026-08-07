@@ -14,16 +14,49 @@ from starlette.testclient import TestClient
 
 from app.gateway.auth_middleware import AuthMiddleware
 from app.gateway.routers import knowledge as knowledge_router
-from deerflow.knowledge.rag import ContextualTitleTransform, resolve_scenario
-from deerflow.knowledge.service import (
-    resolve_space_role,
-    role_at_least,
+from deerflow.knowledge.adapters.storage import (
+    _chunk_text_from_pg_row,
+    _chunk_text_from_store_metadata,
+    _delete_pgvector_rows_for_doc,
+    _pg_params_from_vector_config,
+    _pg_row_metadata,
+    ensure_llama_settings,
+    get_embed_model,
+    list_document_chunks,
 )
+from deerflow.knowledge.app.documents import (
+    delete_all_documents,
+    delete_space,
+    import_document,
+    list_documents,
+)
+from deerflow.knowledge.app.query import attach_user_attrs, compute_precision_recall_at_k, evaluate_search_cases, search
+from deerflow.knowledge.app.spaces import ensure_kind_allowed, resolve_space_role, role_at_least, upsert_grant
+from deerflow.knowledge.contract import EvidenceItem, parse_embed_segments_json
+from deerflow.knowledge.engine.chunk import ContextualTitleTransform, build_node_parser
+from deerflow.knowledge.engine.evidence import (
+    annotate_block_type,
+    custom_metadata_from_chunk,
+    format_evidence_snippet,
+    merge_custom_metadata,
+    user_attrs_from_metadata,
+)
+from deerflow.knowledge.engine.search import (
+    apply_rerank,
+    apply_score_cutoff,
+    build_hybrid_retriever,
+    merge_items_by_doc_buckets,
+    merge_space_hits,
+    resolve_scenario,
+    retrieve_across_spaces,
+    retrieve_in_space,
+    space_budgets,
+)
+from deerflow.utils.file_conversion import sanitize_media
 
 
 def test_pg_params_prefer_connection_string():
     from deerflow.config.knowledge_config import KnowledgeVectorStoreConfig
-    from deerflow.knowledge import rag
 
     cfg = KnowledgeVectorStoreConfig(
         type="pgvector",
@@ -31,7 +64,7 @@ def test_pg_params_prefer_connection_string():
         host="ignored",
         database="ignored",
     )
-    params = rag._pg_params_from_vector_config(cfg)
+    params = _pg_params_from_vector_config(cfg)
     assert params["host"] == "db.example"
     assert params["port"] == 6543
     assert params["database"] == "kb"
@@ -41,7 +74,6 @@ def test_pg_params_prefer_connection_string():
 
 def test_pg_params_use_discrete_fields_when_no_url():
     from deerflow.config.knowledge_config import KnowledgeVectorStoreConfig
-    from deerflow.knowledge import rag
 
     cfg = KnowledgeVectorStoreConfig(
         type="pgvector",
@@ -51,7 +83,7 @@ def test_pg_params_use_discrete_fields_when_no_url():
         user="kb",
         password="pw",
     )
-    params = rag._pg_params_from_vector_config(cfg)
+    params = _pg_params_from_vector_config(cfg)
     assert params == {
         "host": "127.0.0.1",
         "port": 5433,
@@ -62,25 +94,19 @@ def test_pg_params_use_discrete_fields_when_no_url():
 
 
 def test_chunk_text_from_store_metadata():
-    from deerflow.knowledge import rag
-
-    assert rag._chunk_text_from_store_metadata({"text": "beef chunk"}) == "beef chunk"
-    assert rag._chunk_text_from_store_metadata({"_node_content": '{"text":"serialized chunk"}'}) == "serialized chunk"
+    assert _chunk_text_from_store_metadata({"text": "beef chunk"}) == "beef chunk"
+    assert _chunk_text_from_store_metadata({"_node_content": '{"text":"serialized chunk"}'}) == "serialized chunk"
 
 
 def test_chunk_text_from_pg_row_prefers_text_column():
-    from deerflow.knowledge import rag
-
     row = SimpleNamespace(text="牛肉分块", metadata_={"doc_id": "d1"})
-    assert rag._chunk_text_from_pg_row(row, rag._pg_row_metadata(row)) == "牛肉分块"
+    assert _chunk_text_from_pg_row(row, _pg_row_metadata(row)) == "牛肉分块"
 
 
 def test_list_document_chunks_pgvector_fallback():
-    from deerflow.knowledge import rag
-
     with (
-        patch("deerflow.knowledge.rag.load_docstore") as load_ds,
-        patch("deerflow.knowledge.rag._list_document_chunks_from_pgvector") as pg,
+        patch("deerflow.knowledge.adapters.storage.load_docstore") as load_ds,
+        patch("deerflow.knowledge.adapters.storage._list_document_chunks_from_pgvector") as pg,
     ):
         load_ds.return_value = SimpleNamespace(docs={})
         pg.return_value = [
@@ -95,7 +121,7 @@ def test_list_document_chunks_pgvector_fallback():
                 "parse_quality": None,
             }
         ]
-        items = rag.list_document_chunks(space_id="space-1", doc_id="doc-1")
+        items = list_document_chunks(space_id="space-1", doc_id="doc-1")
         pg.assert_called_once_with(space_id="space-1", doc_id="doc-1")
         assert items[0]["text"] == "beef"
 
@@ -147,8 +173,6 @@ def test_role_at_least():
 
 @pytest.mark.asyncio
 async def test_list_documents_filters_by_kind():
-    from deerflow.knowledge import service as knowledge_service
-
     session = AsyncMock()
     rows = [
         SimpleNamespace(
@@ -183,10 +207,10 @@ async def test_list_documents_filters_by_kind():
     session.execute = AsyncMock(return_value=page)
 
     with patch(
-        "deerflow.knowledge.service.resolve_user_display_names",
+        "deerflow.knowledge.app.documents.resolve_user_display_names",
         new=AsyncMock(return_value={"u1": "u1"}),
     ):
-        items, total = await knowledge_service.list_documents(session, "legal", kind="policy", limit=20, offset=0)
+        items, total = await list_documents(session, "legal", kind="policy", limit=20, offset=0)
 
     assert total == 1
     assert len(items) == 1
@@ -249,14 +273,12 @@ async def test_private_space_uses_dept_grant():
 
 @pytest.mark.asyncio
 async def test_upsert_dept_grant_stores_upstream_subject_id():
-    from deerflow.knowledge import service as knowledge_service
-
     session = AsyncMock()
     session.scalar = AsyncMock(return_value=None)
     session.commit = AsyncMock()
     session.refresh = AsyncMock()
 
-    out = await knowledge_service.upsert_grant(
+    out = await upsert_grant(
         session,
         space_id="legal",
         subject_type="dept",
@@ -272,8 +294,6 @@ async def test_upsert_dept_grant_stores_upstream_subject_id():
 
 @pytest.mark.asyncio
 async def test_list_documents_filters_by_query():
-    from deerflow.knowledge import service as knowledge_service
-
     session = AsyncMock()
     rows = []
     page = MagicMock()
@@ -282,10 +302,10 @@ async def test_list_documents_filters_by_query():
     session.execute = AsyncMock(return_value=page)
 
     with patch(
-        "deerflow.knowledge.service.resolve_user_display_names",
+        "deerflow.knowledge.app.documents.resolve_user_display_names",
         new=AsyncMock(return_value={}),
     ):
-        items, total = await knowledge_service.list_documents(session, "legal", q="handbook", limit=20, offset=0)
+        items, total = await list_documents(session, "legal", q="handbook", limit=20, offset=0)
 
     assert total == 0
     assert items == []
@@ -294,8 +314,6 @@ async def test_list_documents_filters_by_query():
 
 @pytest.mark.asyncio
 async def test_import_dedupes_same_checksum():
-    from deerflow.knowledge import service as knowledge_service
-
     existing = SimpleNamespace(
         id="doc-old",
         space_id="legal",
@@ -335,11 +353,11 @@ async def test_import_dedupes_same_checksum():
     factory.return_value.__aexit__ = AsyncMock(return_value=None)
 
     with (
-        patch("deerflow.knowledge.service.hashlib.sha256") as sha,
-        patch("deerflow.knowledge.service.asyncio.create_task") as create_task,
+        patch("deerflow.knowledge.app.documents.hashlib.sha256") as sha,
+        patch("deerflow.knowledge.app.documents.asyncio.create_task") as create_task,
     ):
         sha.return_value.hexdigest.return_value = "deadbeef"
-        out = await knowledge_service.import_document(
+        out = await import_document(
             factory,
             space_id="legal",
             user_id="u1",
@@ -366,8 +384,6 @@ def test_knowledge_fk_ondelete_cascade():
 
 @pytest.mark.asyncio
 async def test_delete_space_clears_vectors_then_db():
-    from deerflow.knowledge import service as knowledge_service
-
     space = SimpleNamespace(id="legal", owner_user_id="u1", access="private")
     doc = SimpleNamespace(id="d1", space_id="legal", source_uri="")
     session = AsyncMock()
@@ -382,14 +398,14 @@ async def test_delete_space_clears_vectors_then_db():
         return fn(*args, **kwargs)
 
     with (
-        patch("deerflow.knowledge.service.resolve_space_role", new=AsyncMock(return_value="admin")),
-        patch("deerflow.knowledge.service.asyncio.to_thread", side_effect=_to_thread),
-        patch("deerflow.knowledge.service.delete_document_vectors") as del_doc,
-        patch("deerflow.knowledge.service.delete_space_vectors") as del_vec,
+        patch("deerflow.knowledge.app.spaces.resolve_space_role", new=AsyncMock(return_value="admin")),
+        patch("deerflow.knowledge.app.documents.asyncio.to_thread", side_effect=_to_thread),
+        patch("deerflow.knowledge.app.documents.delete_document_vectors") as del_doc,
+        patch("deerflow.knowledge.app.documents.delete_space_vectors") as del_vec,
     ):
         del_doc.return_value = 1
         del_vec.return_value = 3
-        await knowledge_service.delete_space(session, space_id="legal", user_id="u1", system_role="user")
+        await delete_space(session, space_id="legal", user_id="u1", system_role="user")
         del_doc.assert_called_once_with(space_id="legal", doc_id="d1")
         del_vec.assert_called_once_with(space_id="legal")
         session.delete.assert_called_once_with(space)
@@ -397,8 +413,6 @@ async def test_delete_space_clears_vectors_then_db():
 
 @pytest.mark.asyncio
 async def test_delete_all_documents_clears_vectors_then_db():
-    from deerflow.knowledge import service as knowledge_service
-
     doc_a = SimpleNamespace(id="d1", space_id="legal")
     doc_b = SimpleNamespace(id="d2", space_id="legal")
     session = AsyncMock()
@@ -412,11 +426,11 @@ async def test_delete_all_documents_clears_vectors_then_db():
         return fn(*args, **kwargs)
 
     with (
-        patch("deerflow.knowledge.service.asyncio.to_thread", side_effect=_to_thread),
-        patch("deerflow.knowledge.service.delete_document_vectors") as del_doc,
+        patch("deerflow.knowledge.app.documents.asyncio.to_thread", side_effect=_to_thread),
+        patch("deerflow.knowledge.app.documents.delete_document_vectors") as del_doc,
     ):
         del_doc.return_value = 1
-        deleted = await knowledge_service.delete_all_documents(
+        deleted = await delete_all_documents(
             session,
             space_id="legal",
         )
@@ -430,9 +444,7 @@ def test_delete_pgvector_predicate_covers_doc_id_fields():
     """Ensure delete helper targets ref_doc_id and metadata.doc_id (not only node list)."""
     import inspect
 
-    from deerflow.knowledge import rag
-
-    src = inspect.getsource(rag._delete_pgvector_rows_for_doc)
+    src = inspect.getsource(_delete_pgvector_rows_for_doc)
     assert 'metadata_["ref_doc_id"]' in src
     assert 'metadata_["doc_id"]' in src
 
@@ -448,7 +460,6 @@ def test_rerank_assembles_configured_postprocessor():
         get_knowledge_config,
         set_knowledge_config,
     )
-    from deerflow.knowledge import rag
 
     prev = get_knowledge_config()
     try:
@@ -468,7 +479,7 @@ def test_rerank_assembles_configured_postprocessor():
         instance.postprocess_nodes.return_value = [SimpleNamespace(score=0.9)]
         fake_cls.return_value = instance
         with patch("deerflow.reflection.resolvers.resolve_class", return_value=fake_cls):
-            out = rag._apply_rerank([SimpleNamespace(score=0.1)], query="E4", top_n=2)
+            out = apply_rerank([SimpleNamespace(score=0.1)], query="E4", top_n=2)
         fake_cls.assert_called_once()
         kwargs = fake_cls.call_args.kwargs
         assert kwargs.get("model") == "qwen3-rerank"
@@ -489,7 +500,6 @@ def test_embed_openai_assembles_via_use():
         get_knowledge_config,
         set_knowledge_config,
     )
-    from deerflow.knowledge import rag
 
     prev = get_knowledge_config()
     try:
@@ -506,7 +516,7 @@ def test_embed_openai_assembles_via_use():
         )
         fake_cls = MagicMock(return_value=MagicMock(name="embed"))
         with patch("deerflow.reflection.resolvers.resolve_class", return_value=fake_cls):
-            rag.get_embed_model()
+            get_embed_model()
         fake_cls.assert_called_once()
         kwargs = fake_cls.call_args.kwargs
         assert kwargs["model_name"] == "text-embedding-3-small"
@@ -573,7 +583,6 @@ def test_query_llm_assembles_via_use():
         get_knowledge_config,
         set_knowledge_config,
     )
-    from deerflow.knowledge import rag
 
     prev = get_knowledge_config()
     try:
@@ -600,7 +609,7 @@ def test_query_llm_assembles_via_use():
             patch("llama_index.core.Settings", mock_settings),
             patch("deerflow.reflection.resolvers.resolve_class", return_value=fake_cls),
         ):
-            assert rag.ensure_llama_settings() is True
+            assert ensure_llama_settings() is True
         fake_cls.assert_called_once()
         kwargs = fake_cls.call_args.kwargs
         assert kwargs["model"] == "gpt-4o-mini"
@@ -611,7 +620,7 @@ def test_query_llm_assembles_via_use():
 
 
 def test_knowledge_extra_does_not_require_chromadb():
-    from deerflow.knowledge.service import knowledge_extra_available
+    from deerflow.knowledge.runtime import knowledge_extra_available
 
     assert knowledge_extra_available() is True
 
@@ -642,33 +651,32 @@ def test_build_node_parser_uses_llamaindex_hierarchical_by_default():
         get_knowledge_config,
         set_knowledge_config,
     )
-    from deerflow.knowledge import rag
 
     prev = get_knowledge_config()
     try:
         set_knowledge_config(KnowledgeConfig(ingest=KnowledgeIngestConfig(strategy="auto")))
         # Plain prose (no markdown headings) → HierarchicalNodeParser
-        parser = rag._build_node_parser([Document(text="hello world without headings")])
+        parser = build_node_parser([Document(text="hello world without headings")])
         assert isinstance(parser, HierarchicalNodeParser)
 
         # Markdown headings → MarkdownNodeParser in auto mode
-        parser = rag._build_node_parser([Document(text="# hello\n\nworld")])
+        parser = build_node_parser([Document(text="# hello\n\nworld")])
         assert isinstance(parser, MarkdownNodeParser)
 
         set_knowledge_config(KnowledgeConfig(ingest=KnowledgeIngestConfig(strategy="markdown")))
-        parser = rag._build_node_parser([Document(text="# hello\n\nworld")])
+        parser = build_node_parser([Document(text="# hello\n\nworld")])
         assert isinstance(parser, MarkdownNodeParser)
 
         set_knowledge_config(KnowledgeConfig(ingest=KnowledgeIngestConfig(strategy="hierarchical")))
-        parser = rag._build_node_parser([Document(text="# hello\n\nworld")])
+        parser = build_node_parser([Document(text="# hello\n\nworld")])
         assert isinstance(parser, HierarchicalNodeParser)
     finally:
         set_knowledge_config(prev)
 
 
-def test_build_node_parser_kind_faq_vs_policy():
+def test_build_node_parser_ignores_kind():
     from llama_index.core import Document
-    from llama_index.core.node_parser import HierarchicalNodeParser, SentenceSplitter
+    from llama_index.core.node_parser import HierarchicalNodeParser, MarkdownNodeParser
 
     from deerflow.config.knowledge_config import (
         KnowledgeConfig,
@@ -676,28 +684,23 @@ def test_build_node_parser_kind_faq_vs_policy():
         get_knowledge_config,
         set_knowledge_config,
     )
-    from deerflow.knowledge import rag
 
     prev = get_knowledge_config()
     try:
         set_knowledge_config(KnowledgeConfig(ingest=KnowledgeIngestConfig(strategy="auto", chunk_sizes=[1024, 256])))
         plain = [Document(text="Q: 如何报销？\nA: 走财务系统提交票据即可。")]
-        faq_parser = rag._build_node_parser(plain, kind="faq")
-        assert isinstance(faq_parser, SentenceSplitter)
-        assert faq_parser.chunk_size == 1024
-
-        policy_parser = rag._build_node_parser(
-            [Document(text="第一章 总则。" + ("条款内容。" * 40))],
-            kind="policy",
-        )
+        faq_parser = build_node_parser(plain)
+        policy_parser = build_node_parser([Document(text="第一章 总则。" + ("条款内容。" * 40))])
+        assert isinstance(faq_parser, HierarchicalNodeParser)
         assert isinstance(policy_parser, HierarchicalNodeParser)
+
+        md_parser = build_node_parser([Document(text="# hello\n\nworld")])
+        assert isinstance(md_parser, MarkdownNodeParser)
     finally:
         set_knowledge_config(prev)
 
 
 def test_compute_precision_recall_at_k():
-    from deerflow.knowledge.rag import compute_precision_recall_at_k
-
     p, r = compute_precision_recall_at_k(
         retrieved_doc_ids=["a", "b", "c"],
         relevant_doc_ids=["a", "d"],
@@ -736,14 +739,12 @@ def test_knowledge_docling_deps_declared():
 
 
 def test_sanitize_media_and_evidence_snippet():
-    from deerflow.knowledge import rag
-
     raw = "前言\n\ndata:image/jpeg;base64," + ("A" * 200) + "\n\n生物特征数据是指面部图像或指纹。"
-    cleaned = rag.sanitize_media(raw)
+    cleaned = sanitize_media(raw)
     assert "base64" not in cleaned
     assert "[image]" in cleaned
-    assert rag.annotate_block_type("| a | b |\n| --- | --- |\n| 1 | 2 |") == "table"
-    snip = rag.format_evidence_snippet(raw + ("填充。" * 400), "生物特征数据", max_chars=200)
+    assert annotate_block_type("| a | b |\n| --- | --- |\n| 1 | 2 |") == "table"
+    snip = format_evidence_snippet(raw + ("填充。" * 400), "生物特征数据", max_chars=200)
     assert "base64" not in snip
     assert len(snip) <= 220
     assert "生物特征" in snip or "面部" in snip
@@ -752,13 +753,11 @@ def test_sanitize_media_and_evidence_snippet():
 def test_score_cutoff_filters_low_rerank_scores():
     from types import SimpleNamespace
 
-    from deerflow.knowledge import rag
-
     nodes = [
         SimpleNamespace(score=0.9, node=SimpleNamespace()),
         SimpleNamespace(score=0.2, node=SimpleNamespace()),
     ]
-    kept = rag._apply_score_cutoff(nodes, 0.35)
+    kept = apply_score_cutoff(nodes, 0.35)
     assert len(kept) == 1
     assert kept[0].score == 0.9
 
@@ -773,7 +772,6 @@ def test_build_retriever_wraps_parent_expand_when_enabled():
         get_knowledge_config,
         set_knowledge_config,
     )
-    from deerflow.knowledge import rag
 
     prev = get_knowledge_config()
     try:
@@ -795,16 +793,16 @@ def test_build_retriever_wraps_parent_expand_when_enabled():
         amalg = MagicMock(name="auto_merge")
         fusion = MagicMock(name="fusion")
         with (
-            patch("deerflow.knowledge.rag.load_docstore", return_value=docstore),
-            patch("deerflow.knowledge.rag.get_vector_store", return_value=vector_store),
-            patch("deerflow.knowledge.rag.get_embed_model", return_value=MagicMock()),
+            patch("deerflow.knowledge.engine.search.load_docstore", return_value=docstore),
+            patch("deerflow.knowledge.engine.search.get_vector_store", return_value=vector_store),
+            patch("deerflow.knowledge.engine.search.get_embed_model", return_value=MagicMock()),
             patch("llama_index.core.StorageContext.from_defaults", return_value=MagicMock()),
             patch("llama_index.core.VectorStoreIndex.from_vector_store", return_value=index),
             patch("llama_index.core.retrievers.QueryFusionRetriever", return_value=fusion),
             patch("llama_index.core.retrievers.AutoMergingRetriever", return_value=amalg) as auto_cls,
-            patch("deerflow.knowledge.rag.ensure_llama_settings", return_value=False),
+            patch("deerflow.knowledge.engine.search.ensure_llama_settings", return_value=False),
         ):
-            out = rag._build_retriever(space_id="s1", retrieve_n=10, num_queries=1)
+            out = build_hybrid_retriever(space_id="s1", retrieve_n=10, num_queries=1)
         assert out is amalg
         auto_cls.assert_called_once()
     finally:
@@ -812,28 +810,13 @@ def test_build_retriever_wraps_parent_expand_when_enabled():
 
 
 def test_scenario_pack_defaults():
-    from deerflow.config.knowledge_config import (
-        KnowledgeConfig,
-        KnowledgeScenarioConfig,
-        get_knowledge_config,
-        set_knowledge_config,
-    )
+    from deerflow.config.knowledge_config import KnowledgeScenarioConfig
 
-    prev = get_knowledge_config()
-    set_knowledge_config(
-        KnowledgeConfig(
-            scenarios=[
-                KnowledgeScenarioConfig(type="general-qa", top_k=8, score=0.35),
-                KnowledgeScenarioConfig(type="policy-review", top_k=10, score=0.3),
-            ]
-        )
-    )
-    try:
+    policy_review = KnowledgeScenarioConfig(type="policy-review", top_k=10, score=0.3)
+    with patch("deerflow.knowledge.app.codes.cached_scenario", return_value=policy_review):
         pack = resolve_scenario(request_scenario=None, space_default_scenarios=["policy-review"])
         assert pack.id == "policy-review"
         assert pack.top_k == 10
-    finally:
-        set_knowledge_config(prev)
 
 
 def test_search_requires_auth():
@@ -843,27 +826,13 @@ def test_search_requires_auth():
 
 @pytest.mark.asyncio
 async def test_search_applies_scenario_pack():
-    from deerflow.config.knowledge_config import (
-        KnowledgeConfig,
-        KnowledgeScenarioConfig,
-        get_knowledge_config,
-        set_knowledge_config,
-    )
-    from deerflow.knowledge import service as knowledge_service
+    from deerflow.config.knowledge_config import KnowledgeScenarioConfig
 
-    prev = get_knowledge_config()
-    set_knowledge_config(
-        KnowledgeConfig(
-            scenarios=[
-                KnowledgeScenarioConfig(type="general-qa", top_k=8, score=0.35),
-                KnowledgeScenarioConfig(
-                    type="policy-review",
-                    top_k=10,
-                    score=0.3,
-                    fusion_num_queries=1,
-                ),
-            ]
-        )
+    policy_review = KnowledgeScenarioConfig(
+        type="policy-review",
+        top_k=10,
+        score=0.3,
+        fusion_num_queries=1,
     )
     space = SimpleNamespace(
         id="legal",
@@ -876,41 +845,39 @@ async def test_search_applies_scenario_pack():
         created_at=None,
         updated_at=None,
     )
-    try:
-        with (
-            patch(
-                "deerflow.knowledge.service.list_accessible_spaces",
-                new=AsyncMock(return_value=[space]),
-            ),
-            patch("deerflow.knowledge.service.search_one_space") as search_one_space,
-        ):
-            search_one_space.return_value = [
-                {
-                    "id": "n1",
-                    "source": "chunk",
-                    "kind": "policy",
-                    "title": "t",
-                    "snippet": "s",
-                    "score": 0.1,
-                    "citable_as": "t",
-                    "metadata": {},
-                }
-            ]
-            pack = await knowledge_service.search(
-                AsyncMock(),
-                user_id="u1",
-                system_role="user",
-                query="E4级产品",
-                spaces=["legal"],
-                top_k=None,
-                scenario=None,
-            )
-            assert len(pack.items) == 1
-            assert search_one_space.call_args.kwargs["top_k"] == 10
-            assert search_one_space.call_args.kwargs["similarity_cutoff"] == 0.3
-            assert search_one_space.call_args.kwargs["fusion_queries"] == 1
-    finally:
-        set_knowledge_config(prev)
+    with (
+        patch("deerflow.knowledge.app.codes.cached_scenario", return_value=policy_review),
+        patch(
+            "deerflow.knowledge.app.query.list_accessible_spaces",
+            new=AsyncMock(return_value=[space]),
+        ),
+        patch("deerflow.knowledge.app.query.retrieve_in_space") as search_one_space,
+    ):
+        search_one_space.return_value = [
+            {
+                "id": "n1",
+                "source": "chunk",
+                "kind": "policy",
+                "title": "t",
+                "snippet": "s",
+                "score": 0.1,
+                "citable_as": "t",
+                "metadata": {},
+            }
+        ]
+        pack = await search(
+            AsyncMock(),
+            user_id="u1",
+            system_role="user",
+            query="E4级产品",
+            spaces=["legal"],
+            top_k=None,
+            scenario=None,
+        )
+        assert len(pack.items) == 1
+        assert search_one_space.call_args.kwargs["top_k"] == 10
+        assert search_one_space.call_args.kwargs["similarity_cutoff"] == 0.3
+        assert search_one_space.call_args.kwargs["fusion_queries"] == 1
 
 
 @pytest.mark.asyncio
@@ -921,7 +888,6 @@ async def test_search_merges_parallel_spaces():
         get_knowledge_config,
         set_knowledge_config,
     )
-    from deerflow.knowledge import service as knowledge_service
 
     prev = get_knowledge_config()
     set_knowledge_config(
@@ -957,12 +923,12 @@ async def test_search_merges_parallel_spaces():
     try:
         with (
             patch(
-                "deerflow.knowledge.service.list_accessible_spaces",
+                "deerflow.knowledge.app.query.list_accessible_spaces",
                 new=AsyncMock(return_value=spaces),
             ),
-            patch("deerflow.knowledge.service.search_one_space", side_effect=_fake_space),
+            patch("deerflow.knowledge.app.query.retrieve_in_space", side_effect=_fake_space),
         ):
-            pack = await knowledge_service.search(
+            pack = await search(
                 AsyncMock(),
                 user_id="u1",
                 system_role="user",
@@ -981,17 +947,15 @@ async def test_search_merges_parallel_spaces():
 
 @pytest.mark.asyncio
 async def test_search_empty_spaces_returns_no_hits():
-    from deerflow.knowledge import service as knowledge_service
-
     space = SimpleNamespace(id="legal", default_scenarios=["policy-review"])
     with (
         patch(
-            "deerflow.knowledge.service.list_accessible_spaces",
+            "deerflow.knowledge.app.query.list_accessible_spaces",
             new=AsyncMock(return_value=[space]),
         ),
-        patch("deerflow.knowledge.service.search_one_space") as search_one_space,
+        patch("deerflow.knowledge.app.query.retrieve_in_space") as search_one_space,
     ):
-        pack = await knowledge_service.search(
+        pack = await search(
             AsyncMock(),
             user_id="u1",
             system_role="user",
@@ -1005,7 +969,7 @@ async def test_search_empty_spaces_returns_no_hits():
 
 
 def test_set_agent_knowledge_defaults_empty_spaces():
-    from deerflow.knowledge.service import (
+    from deerflow.knowledge.runtime import (
         get_agent_knowledge_defaults,
         reset_agent_knowledge_defaults,
         set_agent_knowledge_defaults,
@@ -1017,7 +981,7 @@ def test_set_agent_knowledge_defaults_empty_spaces():
 
 
 def test_agent_knowledge_scope_is_a_hard_ceiling():
-    from deerflow.knowledge.service import (
+    from deerflow.knowledge.runtime import (
         reset_agent_knowledge_defaults,
         resolve_agent_knowledge_scope,
         set_agent_knowledge_defaults,
@@ -1041,7 +1005,7 @@ def test_agent_knowledge_scope_is_a_hard_ceiling():
 
 
 def test_knowledge_scope_without_agent_keeps_request():
-    from deerflow.knowledge.service import resolve_agent_knowledge_scope
+    from deerflow.knowledge.runtime import resolve_agent_knowledge_scope
 
     assert resolve_agent_knowledge_scope(["requested"], "general-qa") == (
         ["requested"],
@@ -1052,18 +1016,10 @@ def test_knowledge_scope_without_agent_keeps_request():
 def test_ensure_kind_allowed_respects_space_whitelist():
     from fastapi import HTTPException
 
-    from deerflow.config.knowledge_config import KnowledgeConfig, get_knowledge_config, set_knowledge_config
-    from deerflow.knowledge.service import ensure_kind_allowed
-
-    prev = get_knowledge_config()
-    try:
-        set_knowledge_config(KnowledgeConfig(kinds=[], scenarios=[]))
-        assert ensure_kind_allowed(kind="any-custom", space_allowed_kinds=[]) == "any-custom"
-        with pytest.raises(HTTPException) as exc:
-            ensure_kind_allowed(kind="other", space_allowed_kinds=["policy"])
-        assert exc.value.status_code == 422
-    finally:
-        set_knowledge_config(prev)
+    assert ensure_kind_allowed(kind="any-custom", space_allowed_kinds=[]) == "any-custom"
+    with pytest.raises(HTTPException) as exc:
+        ensure_kind_allowed(kind="other", space_allowed_kinds=["policy"])
+    assert exc.value.status_code == 422
 
 
 def test_kinds_api_lists_catalog():
@@ -1097,14 +1053,10 @@ class TestKnowledgeSpaceMerge:
     """Per-space parallel retrieval merge (orchestration only)."""
 
     def test_space_budgets_even_split(self):
-        from deerflow.knowledge.rag import space_budgets
-
         assert space_budgets(2, 10) == [5, 5]
         assert space_budgets(3, 10) == [4, 3, 3]
 
     def test_merge_slot_then_rrf_keeps_each_space(self):
-        from deerflow.knowledge.rag import merge_space_hits
-
         buckets = [
             ("legal", [{"id": "law-1", "score": 0.95}], 4),
             ("company", [{"id": "co-1", "score": 0.94}], 3),
@@ -1115,20 +1067,16 @@ class TestKnowledgeSpaceMerge:
         assert {x["id"] for x in merged} == {"law-1", "co-1", "ref-1", "case-1"}
 
     def test_per_doc_merge_from_pooled_hits(self):
-        from deerflow.knowledge.rag import _merge_items_by_doc_buckets
-
         pooled = [
             {"id": "a1", "score": 0.99, "metadata": {"doc_id": "doc-a"}},
             {"id": "a2", "score": 0.98, "metadata": {"doc_id": "doc-a"}},
             {"id": "b1", "score": 0.50, "metadata": {"doc_id": "doc-b"}},
         ]
-        merged = _merge_items_by_doc_buckets(pooled, final_top_k=2, merge_mode="slot_then_rrf")
+        merged = merge_items_by_doc_buckets(pooled, final_top_k=2, merge_mode="slot_then_rrf")
         assert {x["id"] for x in merged} == {"a1", "b1"}
 
     def test_search_one_space_per_doc_parallel(self):
         from unittest.mock import patch
-
-        from deerflow.knowledge import rag
 
         def _fake_retrieve(**kwargs):
             doc_id = kwargs.get("doc_id")
@@ -1139,19 +1087,17 @@ class TestKnowledgeSpaceMerge:
             return []
 
         with (
-            patch.object(rag, "list_space_doc_ids", return_value=["doc-a", "doc-b"]),
-            patch.object(rag, "_retrieve_space_items", side_effect=_fake_retrieve),
+            patch("deerflow.knowledge.engine.search.list_space_doc_ids", return_value=["doc-a", "doc-b"]),
+            patch("deerflow.knowledge.engine.search.retrieve_space_items", side_effect=_fake_retrieve),
         ):
-            out = rag.search_one_space(space_id="legal", query="q", top_k=2)
+            out = retrieve_in_space(space_id="legal", query="q", top_k=2)
         assert {x["id"] for x in out} == {"a1", "b1"}
 
     def test_evaluate_search_cases_needle_hit(self):
         from unittest.mock import patch
 
-        from deerflow.knowledge.rag import evaluate_search_cases
-
         with patch(
-            "deerflow.knowledge.rag.search_spaces",
+            "deerflow.knowledge.app.query.retrieve_across_spaces",
             return_value=[{"snippet": "合规要求说明", "metadata": {"doc_id": "d1", "release": "current"}}],
         ):
             result = evaluate_search_cases(
@@ -1168,7 +1114,7 @@ def test_tag_group_applies_only_when_lane_tags_overlap():
         KnowledgeTagGroupConfig,
         ScenarioLaneConfig,
     )
-    from deerflow.knowledge.catalog import _tag_group_fits
+    from deerflow.knowledge.app.codes import _tag_group_fits
 
     general = KnowledgeScenarioConfig(type="general-qa", top_k=8, score=0.35)
     policy = KnowledgeScenarioConfig(
@@ -1188,7 +1134,7 @@ def test_tag_group_applies_only_when_lane_tags_overlap():
 
 
 def test_compact_scenario_attrs_drops_redundant_fields():
-    from deerflow.knowledge.catalog import _compact_scenario_attrs, linked_scenario_space_id
+    from deerflow.knowledge.app.codes import _compact_scenario_attrs, linked_scenario_space_id
 
     assert linked_scenario_space_id("finance-review", {}) == "finance-review"
     assert linked_scenario_space_id("finance-review", {"space_id": "finance-review"}) == "finance-review"
@@ -1232,8 +1178,6 @@ def test_compact_scenario_attrs_drops_redundant_fields():
 
 
 def test_custom_metadata_from_chunk_excludes_system_keys():
-    from deerflow.knowledge.rag import custom_metadata_from_chunk
-
     meta = {
         "space_id": "s1",
         "doc_id": "d1",
@@ -1245,8 +1189,6 @@ def test_custom_metadata_from_chunk_excludes_system_keys():
 
 
 def test_user_attrs_from_metadata_omits_system_keys():
-    from deerflow.knowledge.rag import user_attrs_from_metadata
-
     meta = {
         "space_id": "legal",
         "doc_id": "d1",
@@ -1261,8 +1203,7 @@ def test_user_attrs_from_metadata_omits_system_keys():
     assert user_attrs_from_metadata({}) == {}
 
 
-def test_attach_user_attrs_sets_field_only_when_present():
-    from deerflow.knowledge.service import EvidenceItem, _attach_user_attrs
+def testattach_user_attrs_sets_field_only_when_present():
 
     with_attrs = EvidenceItem(
         id="e1",
@@ -1280,14 +1221,12 @@ def test_attach_user_attrs_sets_field_only_when_present():
         snippet="s",
         metadata={"doc_id": "d1", "heading_path": "§1"},
     )
-    _attach_user_attrs([with_attrs, without])
+    attach_user_attrs([with_attrs, without])
     assert with_attrs.attrs == {"row_no": 3}
     assert without.attrs is None
 
 
 def test_parse_embed_segments_json():
-    from deerflow.knowledge.service import parse_embed_segments_json
-
     segments = parse_embed_segments_json('[{"text":"row one","metadata":{"row_no":1}}, {"text":"row two","metadata":{"row_no":2}}]')
     assert segments is not None
     assert len(segments) == 2
@@ -1295,8 +1234,6 @@ def test_parse_embed_segments_json():
 
 
 def test_merge_custom_metadata_preserves_system_keys():
-    from deerflow.knowledge.rag import merge_custom_metadata
-
     base = {"space_id": "s1", "doc_id": "d1", "kind": "general"}
     merged = merge_custom_metadata(base, {"row_no": 3, "space_id": "evil", "doc_id": "x"})
     assert merged["space_id"] == "s1"
@@ -1305,8 +1242,6 @@ def test_merge_custom_metadata_preserves_system_keys():
 
 
 def test_search_space_returns_custom_chunk_metadata():
-    from deerflow.knowledge import rag
-
     node = SimpleNamespace(
         node_id="n1",
         metadata={
@@ -1325,11 +1260,11 @@ def test_search_space_returns_custom_chunk_metadata():
     scored = SimpleNamespace(node=node, score=0.9, get_content=lambda: "snippet text")
 
     with (
-        patch.object(rag, "get_knowledge_config") as cfg,
-        patch.object(rag, "_build_retriever", return_value=SimpleNamespace(retrieve=lambda _q: [scored])),
-        patch.object(rag, "_apply_score_cutoff", side_effect=lambda nodes, _cutoff: nodes),
-        patch.object(rag, "rank_by_temporal", side_effect=lambda items, **_kw: items),
-        patch.object(rag, "stable_rank_items", side_effect=lambda items: items),
+        patch("deerflow.knowledge.engine.search.get_knowledge_config") as cfg,
+        patch("deerflow.knowledge.engine.search.build_hybrid_retriever", return_value=SimpleNamespace(retrieve=lambda _q: [scored])),
+        patch("deerflow.knowledge.engine.search.apply_score_cutoff", side_effect=lambda nodes, _cutoff: nodes),
+        patch("deerflow.knowledge.engine.search.rank_by_temporal", side_effect=lambda items, **_kw: items),
+        patch("deerflow.knowledge.engine.search.stable_rank_items", side_effect=lambda items: items),
     ):
         cfg.return_value.retrieval.top_k = 5
         cfg.return_value.retrieval.retrieve_n = 10
@@ -1337,6 +1272,6 @@ def test_search_space_returns_custom_chunk_metadata():
         cfg.return_value.retrieval.snippet_max_chars = 500
         cfg.return_value.retrieval.hybrid = False
         cfg.return_value.retrieval.rerank = False
-        items = rag.search_spaces(space_ids=["legal"], query="test", final_top_k=5, pool_k=5)
+        items = retrieve_across_spaces(space_ids=["legal"], query="test", final_top_k=5, pool_k=5)
     assert items[0]["metadata"]["row_no"] == 7
     assert items[0]["metadata"]["batch_id"] == "b-1"

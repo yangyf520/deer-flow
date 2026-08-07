@@ -8,8 +8,11 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 
 from app.gateway.authz import require_auth, require_permission
 from deerflow.config.knowledge_config import get_knowledge_config
-from deerflow.knowledge import service as knowledge_service
-from deerflow.knowledge.service import (
+from deerflow.knowledge.app import codes as kb_codes
+from deerflow.knowledge.app import documents as kb_docs
+from deerflow.knowledge.app import query as kb_query
+from deerflow.knowledge.app import spaces as kb_spaces
+from deerflow.knowledge.contract import (
     DocumentChunksResponse,
     DocumentImportResponse,
     DocumentResponse,
@@ -17,9 +20,13 @@ from deerflow.knowledge.service import (
     DocumentUpdateRequest,
     EvidencePackResponse,
     KindsListResponse,
+    KnowledgeCatalogResponse,
     KnowledgeSearchRequest,
+    MigrateCatalogHostRequest,
+    MigrateCatalogHostResponse,
     RecallEvalRequest,
     RecallEvalResponse,
+    ScenarioDefinitionRequest,
     ScenarioPackResponse,
     ScenariosListResponse,
     SpaceCreateRequest,
@@ -29,6 +36,10 @@ from deerflow.knowledge.service import (
     SpaceResponse,
     SpacesListResponse,
     SpaceUpdateRequest,
+    parse_embed_attrs_json,
+    parse_embed_segments_json,
+)
+from deerflow.knowledge.runtime import (
     docling_extra_available,
     knowledge_extra_available,
     require_knowledge_extra,
@@ -59,7 +70,7 @@ def _uid(user) -> str:
 
 
 def _request_locale(request: Request) -> str:
-    from deerflow.knowledge.catalog import locale_from_header, norm_locale
+    from deerflow.knowledge.app.codes import locale_from_header, norm_locale
 
     query = request.query_params.get("locale")
     if query:
@@ -85,35 +96,35 @@ async def list_scenarios(request: Request) -> ScenariosListResponse:
     locale = _request_locale(request)
     factory = _session_factory()
     async with factory() as session:
-        catalog = await knowledge_service.get_knowledge_catalog_from_db(session, locale=locale)
+        catalog = await kb_codes.kb_codes.get_knowledge_catalog_from_db(session, locale=locale)
     return ScenariosListResponse(items=catalog.scenarios, total=len(catalog.scenarios))
 
 
-@router.get("/catalog", response_model=knowledge_service.KnowledgeCatalogResponse)
+@router.get("/catalog", response_model=KnowledgeCatalogResponse)
 @require_auth
 @require_permission("knowledge", "read")
-async def list_catalog(request: Request) -> knowledge_service.KnowledgeCatalogResponse:
+async def list_catalog(request: Request) -> KnowledgeCatalogResponse:
     """Knowledge code catalog from DB (pub_codes): scenarios, kinds, tags, tag_groups."""
     locale = _request_locale(request)
     factory = _session_factory()
     async with factory() as session:
-        return await knowledge_service.get_knowledge_catalog_from_db(session, locale=locale)
+        return await kb_codes.kb_codes.get_knowledge_catalog_from_db(session, locale=locale)
 
 
-@router.post("/catalog/migrate-host", response_model=knowledge_service.MigrateCatalogHostResponse)
+@router.post("/catalog/migrate-host", response_model=MigrateCatalogHostResponse)
 @require_auth
 @require_permission("knowledge", "write")
 async def migrate_catalog_host(
-    body: knowledge_service.MigrateCatalogHostRequest,
+    body: MigrateCatalogHostRequest,
     request: Request,
-) -> knowledge_service.MigrateCatalogHostResponse:
+) -> MigrateCatalogHostResponse:
     """Move all catalog scenarios to another knowledge space (码表归属迁移)."""
     factory = _session_factory()
     async with factory() as session:
-        from deerflow.knowledge.catalog import migrate_catalog_host as migrate_host
+        from deerflow.knowledge.app.codes import migrate_catalog_host as migrate_host
 
         updated = await migrate_host(session, host_space_id=body.host_space_id)
-    return knowledge_service.MigrateCatalogHostResponse(
+    return MigrateCatalogHostResponse(
         host_space_id=body.host_space_id.strip(),
         updated=updated,
     )
@@ -127,21 +138,21 @@ async def list_kinds(request: Request) -> KindsListResponse:
     locale = _request_locale(request)
     factory = _session_factory()
     async with factory() as session:
-        catalog = await knowledge_service.get_knowledge_catalog_from_db(session, locale=locale)
+        catalog = await kb_codes.kb_codes.get_knowledge_catalog_from_db(session, locale=locale)
     return KindsListResponse(items=catalog.kinds, total=len(catalog.kinds))
 
 
 @router.put("/scenarios/{code}", response_model=ScenarioPackResponse)
 @require_auth
 @require_permission("knowledge", "write")
-async def upsert_scenario(code: str, body: knowledge_service.ScenarioDefinitionRequest, request: Request) -> ScenarioPackResponse:
+async def upsert_scenario(code: str, body: ScenarioDefinitionRequest, request: Request) -> ScenarioPackResponse:
     """Create or update a knowledge scenario (code + label + retrieval profile)."""
     user = _user(request)
     if body.code != code:
         raise HTTPException(status_code=422, detail="scenario code in path and body must match")
     factory = _session_factory()
     async with factory() as session:
-        from deerflow.knowledge.catalog import upsert_scenario
+        from deerflow.knowledge.app.codes import upsert_scenario
 
         await upsert_scenario(
             session,
@@ -155,13 +166,13 @@ async def upsert_scenario(code: str, body: knowledge_service.ScenarioDefinitionR
             host_space_id=body.host_space_id,
             created_by=_uid(user),
         )
-        await knowledge_service.ensure_catalog_scenario_space(
+        await kb_spaces.ensure_catalog_scenario_space(
             session,
             user_id=_uid(user),
             scenario_code=body.code,
             label=body.label,
         )
-        catalog = await knowledge_service.get_knowledge_catalog_from_db(session, locale=_request_locale(request))
+        catalog = await kb_codes.kb_codes.get_knowledge_catalog_from_db(session, locale=_request_locale(request))
     pack = next((s for s in catalog.scenarios if s.type == code), None)
     if pack is None:
         raise HTTPException(status_code=500, detail="scenario upsert failed")
@@ -175,7 +186,7 @@ async def delete_scenario(code: str, request: Request) -> None:
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        deleted = await knowledge_service.delete_scenario_cascade(
+        deleted = await kb_spaces.delete_scenario_cascade(
             session,
             user_id=_uid(user),
             system_role=user.system_role,
@@ -194,7 +205,7 @@ async def create_space(body: SpaceCreateRequest, request: Request) -> SpaceRespo
         raise HTTPException(status_code=403, detail="Creating spaces is disabled")
     factory = _session_factory()
     async with factory() as session:
-        return await knowledge_service.create_space(
+        return await kb_spaces.create_space(
             session,
             user_id=_uid(user),
             space_id=body.id,
@@ -216,7 +227,7 @@ async def list_my_spaces(request: Request) -> SpacesListResponse:
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        items = await knowledge_service.list_accessible_spaces(session, user_id=_uid(user), system_role=user.system_role)
+        items = await kb_spaces.list_accessible_spaces(session, user_id=_uid(user), system_role=user.system_role)
     return SpacesListResponse(items=items, total=len(items))
 
 
@@ -227,8 +238,8 @@ async def get_space(space_id: str, request: Request) -> SpaceResponse:
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        space, role = await knowledge_service.get_space_or_404(session, space_id=space_id, user_id=_uid(user), system_role=user.system_role)
-        return knowledge_service.space_to_response(space, my_role=role)
+        space, role = await kb_spaces.get_space_or_404(session, space_id=space_id, user_id=_uid(user), system_role=user.system_role)
+        return kb_spaces.space_to_response(space, my_role=role)
 
 
 @router.patch("/spaces/{space_id}", response_model=SpaceResponse)
@@ -238,7 +249,7 @@ async def update_space(space_id: str, body: SpaceUpdateRequest, request: Request
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        return await knowledge_service.update_space(
+        return await kb_spaces.update_space(
             session,
             space_id=space_id,
             user_id=_uid(user),
@@ -255,7 +266,7 @@ async def delete_space(space_id: str, request: Request) -> None:
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        await knowledge_service.delete_space(
+        await kb_docs.delete_space(
             session,
             space_id=space_id,
             user_id=_uid(user),
@@ -270,14 +281,14 @@ async def get_grants(space_id: str, request: Request) -> SpaceGrantsListResponse
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        await knowledge_service.get_space_or_404(
+        await kb_spaces.get_space_or_404(
             session,
             space_id=space_id,
             user_id=_uid(user),
             system_role=user.system_role,
             min_role="admin",
         )
-        items = await knowledge_service.list_grants(session, space_id)
+        items = await kb_spaces.list_grants(session, space_id)
     return SpaceGrantsListResponse(items=items, total=len(items))
 
 
@@ -292,14 +303,14 @@ async def put_grant(
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        await knowledge_service.get_space_or_404(
+        await kb_spaces.get_space_or_404(
             session,
             space_id=space_id,
             user_id=_uid(user),
             system_role=user.system_role,
             min_role="admin",
         )
-        return await knowledge_service.upsert_grant(
+        return await kb_spaces.upsert_grant(
             session,
             space_id=space_id,
             subject_type=body.subject_type,
@@ -324,14 +335,14 @@ async def remove_grant(
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        await knowledge_service.get_space_or_404(
+        await kb_spaces.get_space_or_404(
             session,
             space_id=space_id,
             user_id=_uid(user),
             system_role=user.system_role,
             min_role="admin",
         )
-        await knowledge_service.delete_grant(
+        await kb_spaces.delete_grant(
             session,
             space_id=space_id,
             subject_type=subject_type,
@@ -353,8 +364,8 @@ async def list_documents(
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        await knowledge_service.get_space_or_404(session, space_id=space_id, user_id=_uid(user), system_role=user.system_role)
-        items, total = await knowledge_service.list_documents(session, space_id, kind=kind, q=q, limit=limit, offset=offset)
+        await kb_spaces.get_space_or_404(session, space_id=space_id, user_id=_uid(user), system_role=user.system_role)
+        items, total = await kb_docs.list_documents(session, space_id, kind=kind, q=q, limit=limit, offset=offset)
     return DocumentsListResponse(items=items, total=total, limit=limit, offset=offset)
 
 
@@ -379,15 +390,15 @@ async def import_document(
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        await knowledge_service.get_space_or_404(
+        await kb_spaces.get_space_or_404(
             session,
             space_id=space_id,
             user_id=_uid(user),
             system_role=user.system_role,
             min_role="editor",
         )
-    parsed_attrs = knowledge_service.parse_embed_attrs_json(attrs)
-    parsed_segments = knowledge_service.parse_embed_segments_json(segments)
+    parsed_attrs = parse_embed_attrs_json(attrs)
+    parsed_segments = parse_embed_segments_json(segments)
     data = b""
     filename = "segments.json"
     if file is not None:
@@ -395,7 +406,7 @@ async def import_document(
         filename = file.filename or "upload.bin"
     if not data and parsed_segments is None:
         raise HTTPException(status_code=400, detail="file or segments required")
-    return await knowledge_service.import_document(
+    return await kb_docs.import_document(
         factory,
         space_id=space_id,
         user_id=_uid(user),
@@ -417,12 +428,12 @@ async def get_document(space_id: str, doc_id: str, request: Request) -> Document
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        await knowledge_service.get_space_or_404(session, space_id=space_id, user_id=_uid(user), system_role=user.system_role)
+        await kb_spaces.get_space_or_404(session, space_id=space_id, user_id=_uid(user), system_role=user.system_role)
         row = await session.get(KnowledgeDocumentRow, doc_id)
         if row is None or row.space_id != space_id:
             raise HTTPException(status_code=404, detail="Document not found")
-        names = await knowledge_service.resolve_user_display_names(session, [row.created_by])
-        return knowledge_service.doc_to_response(row, created_by_name=names.get(row.created_by))
+        names = await kb_docs.resolve_user_display_names(session, [row.created_by])
+        return kb_docs.doc_to_response(row, created_by_name=names.get(row.created_by))
 
 
 @router.patch("/spaces/{space_id}/documents/{doc_id}", response_model=DocumentResponse)
@@ -438,14 +449,14 @@ async def patch_document(
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        await knowledge_service.get_space_or_404(
+        await kb_spaces.get_space_or_404(
             session,
             space_id=space_id,
             user_id=_uid(user),
             system_role=user.system_role,
             min_role="editor",
         )
-        return await knowledge_service.update_document(
+        return await kb_docs.update_document(
             session,
             space_id=space_id,
             doc_id=doc_id,
@@ -467,8 +478,8 @@ async def list_document_chunks(space_id: str, doc_id: str, request: Request) -> 
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        await knowledge_service.get_space_or_404(session, space_id=space_id, user_id=_uid(user), system_role=user.system_role)
-        return await knowledge_service.get_document_chunks(session, space_id=space_id, doc_id=doc_id)
+        await kb_spaces.get_space_or_404(session, space_id=space_id, user_id=_uid(user), system_role=user.system_role)
+        return await kb_docs.get_document_chunks(session, space_id=space_id, doc_id=doc_id)
 
 
 @router.delete("/spaces/{space_id}/documents/{doc_id}", status_code=204)
@@ -480,14 +491,14 @@ async def delete_document(space_id: str, doc_id: str, request: Request) -> None:
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        await knowledge_service.get_space_or_404(
+        await kb_spaces.get_space_or_404(
             session,
             space_id=space_id,
             user_id=_uid(user),
             system_role=user.system_role,
             min_role="editor",
         )
-        await knowledge_service.delete_document(session, space_id=space_id, doc_id=doc_id)
+        await kb_docs.delete_document(session, space_id=space_id, doc_id=doc_id)
 
 
 @router.delete("/spaces/{space_id}/documents", status_code=204)
@@ -497,14 +508,14 @@ async def delete_all_documents(space_id: str, request: Request) -> None:
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        await knowledge_service.get_space_or_404(
+        await kb_spaces.get_space_or_404(
             session,
             space_id=space_id,
             user_id=_uid(user),
             system_role=user.system_role,
             min_role="editor",
         )
-        await knowledge_service.delete_all_documents(session, space_id=space_id)
+        await kb_docs.delete_all_documents(session, space_id=space_id)
 
 
 @router.post("/spaces/{space_id}/documents/{doc_id}/reindex", response_model=DocumentImportResponse)
@@ -521,7 +532,7 @@ async def reindex_document(
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        await knowledge_service.get_space_or_404(
+        await kb_spaces.get_space_or_404(
             session,
             space_id=space_id,
             user_id=_uid(user),
@@ -529,7 +540,7 @@ async def reindex_document(
             min_role="editor",
         )
     data = await file.read()
-    doc = await knowledge_service.reindex_document(
+    doc = await kb_docs.reindex_document(
         factory,
         space_id=space_id,
         doc_id=doc_id,
@@ -548,7 +559,7 @@ async def search(body: KnowledgeSearchRequest, request: Request) -> EvidencePack
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        return await knowledge_service.search(
+        return await kb_query.search(
             session,
             user_id=_uid(user),
             system_role=user.system_role,
@@ -569,7 +580,7 @@ async def eval_recall(body: RecallEvalRequest, request: Request) -> RecallEvalRe
     user = _user(request)
     factory = _session_factory()
     async with factory() as session:
-        return await knowledge_service.eval_recall(
+        return await kb_query.eval_recall(
             session,
             user_id=_uid(user),
             system_role=user.system_role,

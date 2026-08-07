@@ -131,10 +131,10 @@ async def test_supplement_anchors():
 
     with (
         patch(
-            "deerflow.knowledge.service.resolve_agent_knowledge_scope",
+            "deerflow.knowledge.runtime.resolve_agent_knowledge_scope",
             return_value=(["sense-ri-legal"], "policy-review"),
         ),
-        patch("deerflow.knowledge.service.search", search),
+        patch("deerflow.knowledge.app.query.search", search),
     ):
         new_packs, section_results = await supplement_missing_space_documents(
             session_factory=lambda: _Session(),
@@ -176,7 +176,7 @@ def test_prepare_docling_fallback(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_retrieve_skips_empty():
     search = AsyncMock()
-    with patch("deerflow.knowledge.service.search", search):
+    with patch("deerflow.knowledge.app.query.search", search):
         out = await retrieve_for_sections(
             session=MagicMock(),
             user_id="u1",
@@ -1167,10 +1167,10 @@ class TestPolicyReview:
         try:
             with (
                 patch(
-                    "deerflow.knowledge.service.list_accessible_spaces",
+                    "deerflow.knowledge.app.query.list_accessible_spaces",
                     new=AsyncMock(return_value=[SimpleNamespace(id=sid, default_scenarios=["policy-review"]) for sid in ("legal", "company", "reference", "case")]),
                 ),
-                patch("deerflow.knowledge.service.search_one_space", side_effect=_fake_search_one),
+                patch("deerflow.knowledge.app.query.retrieve_in_space", side_effect=_fake_search_one),
             ):
                 out = await retrieve_for_sections(
                     session=object(),
@@ -1256,7 +1256,7 @@ class TestPolicyReview:
         from langchain_core.messages import ToolMessage
         from langgraph.types import Command
 
-        from deerflow.knowledge.service import (
+        from deerflow.knowledge.runtime import (
             reset_agent_knowledge_defaults,
             set_agent_knowledge_defaults,
         )
@@ -1278,7 +1278,7 @@ class TestPolicyReview:
         try:
             with (
                 patch("deerflow.config.knowledge_config.get_knowledge_config") as gk,
-                patch("deerflow.knowledge.service.knowledge_extra_available", return_value=True),
+                patch("deerflow.knowledge.runtime.knowledge_extra_available", return_value=True),
                 patch("deerflow.runtime.user_context.get_current_user") as gu,
                 patch("deerflow.persistence.engine.get_session_factory") as sf,
                 patch(
@@ -1373,7 +1373,7 @@ class TestPolicyReview:
 
         with (
             patch("deerflow.config.knowledge_config.get_knowledge_config") as gk,
-            patch("deerflow.knowledge.service.knowledge_extra_available", return_value=True),
+            patch("deerflow.knowledge.runtime.knowledge_extra_available", return_value=True),
             patch("deerflow.runtime.user_context.get_current_user") as gu,
             patch("deerflow.persistence.engine.get_session_factory") as sf,
             patch(
@@ -1464,7 +1464,7 @@ class TestPolicyReview:
 
         with (
             patch("deerflow.config.knowledge_config.get_knowledge_config") as gk,
-            patch("deerflow.knowledge.service.knowledge_extra_available", return_value=True),
+            patch("deerflow.knowledge.runtime.knowledge_extra_available", return_value=True),
             patch("deerflow.runtime.user_context.get_current_user") as gu,
             patch("deerflow.persistence.engine.get_session_factory") as sf,
             patch(

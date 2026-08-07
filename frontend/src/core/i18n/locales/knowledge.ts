@@ -404,32 +404,10 @@ export const knowledgeEnUS: KnowledgeTranslations = {
     degraded: "Partial or lossy extraction — review chunks",
     failed: "Could not extract usable text",
   },
-  kinds: {
-    policy: "Policy",
-    reference: "Regulations",
-    general: "General",
-    sop: "SOP",
-    case: "Case",
-    faq: "FAQ",
-  },
-  scenarios: {
-    auto: "Autonomous driving",
-    health: "Smart healthcare",
-    fintech: "FinTech",
-    "smart-city": "Smart city",
-    education: "Education",
-    business: "Business",
-    "culture-media": "Culture & entertainment",
-  },
-  tagGroups: {
-    national: "National regulations",
-    company: "Company policy",
-  },
-  tags: {
-    statute: "Statute",
-    "national-law": "National law",
-    "company-policy": "Company policy",
-  },
+  kinds: {},
+  scenarios: {},
+  tagGroups: {},
+  tags: {},
 };
 
 export const knowledgeZhCN: KnowledgeTranslations = {
@@ -644,30 +622,8 @@ export const knowledgeZhCN: KnowledgeTranslations = {
     degraded: "提取不完整 — 请核对分块",
     failed: "无法提取可用文本",
   },
-  kinds: {
-    policy: "制度",
-    reference: "法规",
-    general: "通用",
-    sop: "SOP",
-    case: "案例",
-    faq: "FAQ",
-  },
-  scenarios: {
-    auto: "自动驾驶",
-    health: "智慧医疗",
-    fintech: "金融科技",
-    "smart-city": "智慧城市",
-    education: "教育",
-    business: "商业",
-    "culture-media": "文娱",
-  },
-  tagGroups: {
-    national: "国家法规",
-    company: "公司制度",
-  },
-  tags: {
-    statute: "法律",
-    "national-law": "国家法律",
-    "company-policy": "公司制度",
-  },
+  kinds: {},
+  scenarios: {},
+  tagGroups: {},
+  tags: {},
 };

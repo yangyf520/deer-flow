@@ -459,7 +459,7 @@ async def retrieve_async(
     top_k: int | None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     from deerflow.config.knowledge_config import get_knowledge_config
-    from deerflow.knowledge.service import knowledge_extra_available
+    from deerflow.knowledge.runtime import knowledge_extra_available
     from deerflow.persistence.engine import get_session_factory
     from deerflow.runtime.user_context import get_current_user, resolve_runtime_user_id
 

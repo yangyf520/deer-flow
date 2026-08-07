@@ -24,7 +24,7 @@ class KnowledgeIngestConfig(BaseModel):
     # auto: MarkdownNodeParser when markdown headings/tables; else HierarchicalNodeParser
     # markdown: MarkdownNodeParser | hierarchical: HierarchicalNodeParser | use: honor node_parser_use only
     strategy: str = "auto"
-    # Smaller leaves improve precision for policy/SOP docs (industry Small-to-Big).
+    # Smaller leaves improve precision for long-form docs (Small-to-Big).
     chunk_sizes: list[int] = Field(default_factory=lambda: [1024, 256])
     chunk_overlap: int = 64
     # Override parser class, e.g. llama_index.core.node_parser:SentenceSplitter

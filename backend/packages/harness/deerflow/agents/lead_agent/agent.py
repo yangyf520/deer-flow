@@ -500,7 +500,7 @@ def _make_lead_agent(config: RunnableConfig, *, app_config: AppConfig):
 
     # Establish this run's knowledge scope, including an empty scope for the
     # default/bootstrap Agent so a previous ContextVar value cannot leak.
-    from deerflow.knowledge.service import set_agent_knowledge_defaults
+    from deerflow.knowledge.runtime import set_agent_knowledge_defaults
 
     set_agent_knowledge_defaults(
         spaces=agent_config.knowledge_spaces if agent_config else None,

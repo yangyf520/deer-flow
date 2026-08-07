@@ -16,6 +16,7 @@ from deerflow.config.knowledge_config import (
     KnowledgeScenarioConfig,
     KnowledgeTagGroupConfig,
     ScenarioLaneConfig,
+    _default_scenarios,
     get_knowledge_config,
 )
 from deerflow.persistence.pub_codes.model import PubCodeRow
@@ -28,22 +29,14 @@ TYPE_TAG_GROUP = "tag_group"
 LOCALE_ZH = "zh-CN"
 LOCALE_EN = "en-US"
 
-# Default industry scenario catalog (code, zh label, en label).
-CANONICAL_SCENARIOS: tuple[tuple[str, str, str], ...] = (
-    ("auto", "自动驾驶", "Autonomous driving"),
-    ("health", "智慧医疗", "Smart healthcare"),
-    ("fintech", "金融科技", "FinTech"),
-    ("smart-city", "智慧城市", "Smart city"),
-    ("education", "教育", "Education"),
-    ("business", "商业", "Business"),
-    ("culture-media", "文娱", "Culture & entertainment"),
-)
-
-CANONICAL_SCENARIO_CODES: frozenset[str] = frozenset(code for code, _, _ in CANONICAL_SCENARIOS)
-
 
 def default_scenario_code() -> str:
-    return CANONICAL_SCENARIOS[0][0]
+    """Fallback scenario id when request/space omit one — pub_codes first, then config."""
+    with _cache_lock:
+        if _catalog_cache and _catalog_cache.scenarios:
+            return sorted(_catalog_cache.scenarios.keys())[0]
+    scenarios = get_knowledge_config().scenarios
+    return scenarios[0].type if scenarios else _default_scenarios()[0].type
 
 
 _cache_lock = threading.Lock()
@@ -69,12 +62,6 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-def invalidate_cache() -> None:
-    global _catalog_cache
-    with _cache_lock:
-        _catalog_cache = None
-
-
 def cached_scenario(scenario_id: str | None) -> KnowledgeScenarioConfig | None:
     """Sync read for RAG — populated by ``refresh_cache``."""
     sid = (scenario_id or "").strip()
@@ -84,13 +71,6 @@ def cached_scenario(scenario_id: str | None) -> KnowledgeScenarioConfig | None:
         if _catalog_cache is None:
             return None
         return _catalog_cache.scenarios.get(sid)
-
-
-def cached_scenario_codes() -> set[str]:
-    with _cache_lock:
-        if _catalog_cache is None:
-            return set()
-        return set(_catalog_cache.scenarios.keys())
 
 
 def _scenario_config_from_row(row: PubCodeRow) -> KnowledgeScenarioConfig:
@@ -333,10 +313,7 @@ def _tag_group_fits(
 
 def _seed_defaults() -> KnowledgeConfig:
     """Bootstrap catalog when DB and config.yaml both omit scenarios."""
-    return KnowledgeConfig(
-        scenarios=[KnowledgeScenarioConfig(type=code) for code, _, _ in CANONICAL_SCENARIOS],
-        tag_groups=[],
-    )
+    return KnowledgeConfig(scenarios=list(_default_scenarios()), tag_groups=[])
 
 
 async def seed_catalog(session: AsyncSession) -> bool:
@@ -355,27 +332,9 @@ async def seed_catalog(session: AsyncSession) -> bool:
     tag_labels = {t.id: _default_label_for_code(t.id) for t in cfg.tags if t.id}
     tag_group_defs = list(cfg.tag_groups)
 
-    label_map = {code: zh for code, zh, _ in CANONICAL_SCENARIOS}
-    label_map.update(
-        {
-            "policy": "制度",
-            "reference": "法规",
-            "case": "案例",
-            "national": "国家法规",
-            "company": "公司制度",
-            "statute": "法律",
-            "national-law": "国家法律",
-            "company-policy": "公司制度",
-        }
-    )
-    english_label_map = {code: en for code, _, en in CANONICAL_SCENARIOS}
-
     for index, scenario in enumerate(cfg.scenarios):
-        label_zh = label_map.get(scenario.type, _default_label_for_code(scenario.type))
-        label_en = english_label_map.get(scenario.type, _default_label_for_code(scenario.type))
-        scenario_labels = _norm_labels(
-            {LOCALE_ZH: label_zh, LOCALE_EN: label_en},
-        )
+        fb = _default_label_for_code(scenario.type)
+        scenario_labels = _norm_labels({LOCALE_ZH: fb, LOCALE_EN: fb})
         attrs: dict[str, Any] = {
             "labels": scenario_labels,
         }
@@ -416,7 +375,7 @@ async def seed_catalog(session: AsyncSession) -> bool:
                     domain=KNOWLEDGE_DOMAIN,
                     type_key=TYPE_KIND,
                     code=kind,
-                    label=label_map.get(kind, kind_labels.get(kind, _default_label_for_code(kind))),
+                    label=kind_labels.get(kind, _default_label_for_code(kind)),
                     parent_code=scenario.type,
                     attrs={},
                     sort_order=kind_index,
@@ -436,7 +395,7 @@ async def seed_catalog(session: AsyncSession) -> bool:
                         domain=KNOWLEDGE_DOMAIN,
                         type_key=TYPE_TAG_GROUP,
                         code=group.id,
-                        label=label_map.get(group.id, _default_label_for_code(group.id)),
+                        label=_default_label_for_code(group.id),
                         parent_code=scenario.type,
                         attrs={"tags": list(group.tags or [])},
                         sort_order=group_index,
@@ -464,7 +423,7 @@ async def seed_catalog(session: AsyncSession) -> bool:
                         domain=KNOWLEDGE_DOMAIN,
                         type_key=TYPE_TAG,
                         code=str(tag),
-                        label=label_map.get(str(tag), tag_labels.get(str(tag), _default_label_for_code(str(tag)))),
+                        label=tag_labels.get(str(tag), _default_label_for_code(str(tag))),
                         parent_code=scenario.type,
                         attrs={},
                         sort_order=0,
@@ -481,174 +440,9 @@ async def seed_catalog(session: AsyncSession) -> bool:
     return bool(rows)
 
 
-async def repair_tag_groups(session: AsyncSession) -> int:
-    """Drop tag_group rows not referenced by the parent scenario's lane tags."""
-    rows = list(
-        (
-            await session.execute(
-                select(PubCodeRow).where(
-                    PubCodeRow.domain == KNOWLEDGE_DOMAIN,
-                    PubCodeRow.type_key == TYPE_TAG_GROUP,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    if not rows:
-        return 0
-
-    scenario_rows = {
-        row.code: row
-        for row in (
-            await session.execute(
-                select(PubCodeRow).where(
-                    PubCodeRow.domain == KNOWLEDGE_DOMAIN,
-                    PubCodeRow.type_key == TYPE_SCENARIO,
-                    PubCodeRow.parent_code == "",
-                )
-            )
-        )
-        .scalars()
-        .all()
-    }
-
-    removed = 0
-    for row in rows:
-        parent = (row.parent_code or "").strip()
-        scenario_row = scenario_rows.get(parent)
-        if scenario_row is None:
-            await session.delete(row)
-            removed += 1
-            continue
-        scenario_cfg = _scenario_config_from_row(scenario_row)
-        scenario_tags = _scenario_lane_tags(scenario_cfg)
-        group_tags = {str(tag) for tag in (row.attrs or {}).get("tags", []) if tag}
-        if not scenario_tags or not group_tags.intersection(scenario_tags):
-            await session.delete(row)
-            removed += 1
-
-    if removed:
-        await session.commit()
-    return removed
-
-
-async def sync_canonical_scenarios(session: AsyncSession) -> int:
-    """Upsert default industry scenarios and hide legacy bootstrap rows."""
-    changed = 0
-    now = _utcnow()
-    for index, (code, label_zh, label_en) in enumerate(CANONICAL_SCENARIOS):
-        labels = _norm_labels({LOCALE_ZH: label_zh, LOCALE_EN: label_en})
-        attrs = _compact_scenario_attrs({"labels": labels}, code=code)
-        display = _main_label(labels)
-        row = (
-            await session.execute(
-                select(PubCodeRow).where(
-                    PubCodeRow.domain == KNOWLEDGE_DOMAIN,
-                    PubCodeRow.type_key == TYPE_SCENARIO,
-                    PubCodeRow.parent_code == "",
-                    PubCodeRow.code == code,
-                )
-            )
-        ).scalar_one_or_none()
-        if row is None:
-            session.add(
-                PubCodeRow(
-                    id=str(uuid.uuid4()),
-                    domain=KNOWLEDGE_DOMAIN,
-                    type_key=TYPE_SCENARIO,
-                    code=code,
-                    label=display,
-                    parent_code="",
-                    attrs=attrs,
-                    sort_order=index,
-                    enabled=True,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
-            changed += 1
-            continue
-        dirty = False
-        if row.label != display:
-            row.label = display
-            dirty = True
-        if row.attrs != attrs:
-            row.attrs = attrs
-            dirty = True
-        if row.sort_order != index:
-            row.sort_order = index
-            dirty = True
-        if not row.enabled:
-            row.enabled = True
-            dirty = True
-        if dirty:
-            row.updated_at = now
-            changed += 1
-
-    legacy_rows = list(
-        (
-            await session.execute(
-                select(PubCodeRow).where(
-                    PubCodeRow.domain == KNOWLEDGE_DOMAIN,
-                    PubCodeRow.type_key == TYPE_SCENARIO,
-                    PubCodeRow.parent_code == "",
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    for row in legacy_rows:
-        if row.code in CANONICAL_SCENARIO_CODES or not row.enabled:
-            continue
-        row.enabled = False
-        row.updated_at = now
-        changed += 1
-
-    if changed:
-        await session.commit()
-    return changed
-
-
-async def repair_scenario_attrs(session: AsyncSession) -> int:
-    """Normalize stored scenario attrs (drop redundant keys from older rows)."""
-    rows = list(
-        (
-            await session.execute(
-                select(PubCodeRow).where(
-                    PubCodeRow.domain == KNOWLEDGE_DOMAIN,
-                    PubCodeRow.type_key == TYPE_SCENARIO,
-                    PubCodeRow.parent_code == "",
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    updated = 0
-    for row in rows:
-        compact = _compact_scenario_attrs(dict(row.attrs or {}), code=row.code)
-        if compact != (row.attrs or {}):
-            row.attrs = compact
-            row.updated_at = _utcnow()
-            updated += 1
-    if updated:
-        await session.commit()
-    return updated
-
-
 async def ensure_catalog(session: AsyncSession) -> _CatalogCache:
     await seed_catalog(session)
-    await sync_canonical_scenarios(session)
-    await repair_tag_groups(session)
-    await repair_scenario_attrs(session)
     return await refresh_cache(session)
-
-
-async def list_scenario_codes(session: AsyncSession) -> list[str]:
-    cache = await ensure_catalog(session)
-    return sorted(cache.scenarios.keys())
 
 
 async def validate_scenario_code(session: AsyncSession, code: str) -> str:
@@ -920,3 +714,11 @@ async def delete_scenario(session: AsyncSession, code: str) -> tuple[bool, str |
     await session.commit()
     await refresh_cache(session)
     return True, space_id
+
+
+async def get_knowledge_catalog_from_db(session: AsyncSession, *, locale: str = "zh-CN"):
+    """Load catalog payload from pub_codes and validate as API response."""
+    from deerflow.knowledge.contract import KnowledgeCatalogResponse
+
+    raw = await get_catalog(session, locale=locale)
+    return KnowledgeCatalogResponse.model_validate(raw)

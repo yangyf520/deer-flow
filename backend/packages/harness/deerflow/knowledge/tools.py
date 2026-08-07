@@ -25,10 +25,8 @@ async def search_tool(
         scenario: Optional retrieval scenario. Agent-bound scenario takes precedence.
     """
     from deerflow.config.knowledge_config import get_knowledge_config
-    from deerflow.knowledge.service import (
-        knowledge_extra_available,
-        search,
-    )
+    from deerflow.knowledge.app.query import search
+    from deerflow.knowledge.runtime import knowledge_extra_available
     from deerflow.persistence.engine import get_session_factory
     from deerflow.runtime.user_context import get_current_user
 

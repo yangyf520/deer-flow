@@ -383,7 +383,7 @@ def trim_snippet(text: str, *, limit: int = DIGEST_SNIPPET_CHARS) -> str:
 
 
 def _digest_evidence_entry(item: dict[str, Any], *, snippet_chars: int = DIGEST_SNIPPET_CHARS) -> dict[str, Any]:
-    from deerflow.knowledge.rag import user_attrs_from_metadata
+    from deerflow.knowledge.engine.evidence import user_attrs_from_metadata
 
     item_id = item.get("id")
     entry: dict[str, Any] = {
@@ -614,7 +614,8 @@ async def supplement_missing_space_documents(
     """Ensure every ready document in bound spaces contributes at least one evidence hit."""
     from sqlalchemy import select
 
-    from deerflow.knowledge.service import resolve_agent_knowledge_scope, search
+    from deerflow.knowledge.app.query import search
+    from deerflow.knowledge.runtime import resolve_agent_knowledge_scope
     from deerflow.persistence.knowledge.model import KnowledgeDocumentRow
 
     bound_spaces, _ = resolve_agent_knowledge_scope(spaces, scenario)
@@ -680,7 +681,7 @@ async def retrieve_for_sections(
     as_of_date: str | None = None,
 ) -> dict[str, Any]:
     """Parallel per-section retrieval; space + document paths merge inside knowledge.search."""
-    from deerflow.knowledge.service import search
+    from deerflow.knowledge.app.query import search
 
     if session is None and session_factory is None:
         raise ValueError("session or session_factory is required")
@@ -1008,7 +1009,7 @@ def evidence_index(packs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 
 def enrich_citations(result: dict[str, Any], packs: list[dict[str, Any]]) -> None:
     """Fill display fields from Evidence Pack; grounding key remains citation.id."""
-    from deerflow.knowledge.rag import user_attrs_from_metadata
+    from deerflow.knowledge.engine.evidence import user_attrs_from_metadata
 
     index = evidence_index(packs)
     if not index:
@@ -1047,7 +1048,7 @@ def build_references(result: dict[str, Any], packs: list[dict[str, Any]]) -> Non
     references section is independently verifiable and cannot echo a
     hallucinated citation id.
     """
-    from deerflow.knowledge.rag import user_attrs_from_metadata
+    from deerflow.knowledge.engine.evidence import user_attrs_from_metadata
 
     index = evidence_index(packs)
     refs: list[dict[str, Any]] = []
