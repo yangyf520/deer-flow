@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from difflib import SequenceMatcher
 from typing import Any
 
 from deerflow.policy_review.contract import (
@@ -22,13 +23,224 @@ CORE_PIPELINE_STAGES = ("prepare", "retrieve", "draft", "validate", "deliver")
 MD_ESCAPE_RE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!|>~])")
 MD_MARKER_RE = re.compile(r"[*`]+")
 WS_RE = re.compile(r"\s+")
+# Models truncate with mixed ellipsis styles; normalize for grounding, not display.
+ELLIPSIS_RE = re.compile(r"\.{2,}|…+")
+FULLWIDTH_PUNCT = str.maketrans(
+    {
+        "，": ",",
+        "。": ".",
+        "；": ";",
+        "：": ":",
+        "！": "!",
+        "？": "?",
+        "（": "(",
+        "）": ")",
+        "【": "[",
+        "】": "]",
+        "《": "<",
+        "》": ">",
+        "、": ",",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2018": "'",
+        "\u2019": "'",
+    }
+)
+SENTENCE_SPLIT = re.compile(r"(?<=[。！？；;.!?])\s*")
 
 
 def normalize_quote(text: str) -> str:
     """Strip markdown emphasis/escapes/whitespace for grounding comparisons."""
     text = MD_ESCAPE_RE.sub(r"\1", text)
     text = MD_MARKER_RE.sub("", text)
+    text = ELLIPSIS_RE.sub("", text)
+    text = text.translate(FULLWIDTH_PUNCT)
     return WS_RE.sub("", text)
+
+
+def _section_matches(hint: str | None, section_id: str) -> bool:
+    if not hint or not section_id:
+        return True
+    hint = hint.strip()
+    sid = section_id.strip()
+    if hint in sid or sid in hint:
+        return True
+    hint_norm = normalize_quote(hint)
+    sid_norm = normalize_quote(sid)
+    return bool(hint_norm and sid_norm and (hint_norm in sid_norm or sid_norm in hint_norm))
+
+
+def _quote_score(needle: str, candidate: str, *, text_hint: str = "", min_ratio: float = 0.35) -> int:
+    """Score how well candidate matches model quote (+ optional finding text)."""
+    needle_norm = normalize_quote(needle)
+    cand_norm = normalize_quote(candidate)
+    if not needle_norm or not cand_norm:
+        return 0
+    if needle_norm in cand_norm:
+        return len(needle_norm) * 1000 + len(cand_norm)
+    if cand_norm in needle_norm:
+        return len(cand_norm) * 1000
+    hint_norm = normalize_quote(text_hint)
+    combined = needle_norm + hint_norm if hint_norm else needle_norm
+    ratio = SequenceMatcher(None, combined, cand_norm).ratio()
+    if hint_norm:
+        ratio = max(ratio, SequenceMatcher(None, needle_norm, cand_norm).ratio())
+    if ratio < min_ratio:
+        return 0
+    return int(ratio * 10000) + min(len(needle_norm), len(cand_norm))
+
+
+def _body_quotes(body: str, *, cap: int = 16) -> list[str]:
+    text = (body or "").strip()
+    if not text:
+        return []
+    parts = [p.strip() for p in SENTENCE_SPLIT.split(text) if p and p.strip()]
+    if not parts:
+        parts = [text]
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        candidate = part if len(part) <= 280 else part[:280]
+        key = normalize_quote(candidate)
+        if len(key) < 8 or key in seen:
+            continue
+        seen.add(key)
+        out.append(candidate)
+        if len(out) >= cap:
+            break
+    return out
+
+
+def _section_quote_candidates(body: str) -> list[str]:
+    """Contiguous spans from section body for quote grounding."""
+    text = (body or "").strip()
+    if not text:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for line in text.splitlines():
+        stripped = line.strip()
+        if len(stripped) >= 8:
+            key = normalize_quote(stripped)
+            if key not in seen:
+                seen.add(key)
+                out.append(stripped if len(stripped) <= 280 else stripped[:280])
+    for cand in _body_quotes(text, cap=24):
+        key = normalize_quote(cand)
+        if key not in seen:
+            seen.add(key)
+            out.append(cand)
+    return out
+
+
+def _best_quote(
+    quote: str,
+    *,
+    section_hint: str | None,
+    text_hint: str = "",
+    source_sections: list[dict[str, Any]],
+    quote_pool: list[dict[str, Any]] | None,
+    relaxed: bool = False,
+) -> str | None:
+    if not normalize_quote(quote):
+        return None
+
+    min_ratio = 0.28 if relaxed else 0.35
+    candidates: list[tuple[int, int, str]] = []
+
+    def consider(candidate: str, section_id: str = "", *, enforce_section: bool) -> None:
+        cleaned = candidate.strip()
+        if not cleaned:
+            return
+        if enforce_section and section_hint and section_id and not _section_matches(section_hint, section_id):
+            return
+        if quote_matches(cleaned, source_sections) == 0:
+            return
+        score = _quote_score(quote, cleaned, text_hint=text_hint, min_ratio=min_ratio)
+        if score <= 0:
+            return
+        candidates.append((score, len(cleaned), cleaned))
+
+    pool_entries = [entry for entry in (quote_pool or []) if isinstance(entry, dict)]
+    for entry in pool_entries:
+        sid = str(entry.get("section_id") or "")
+        quotes = entry.get("quotes")
+        if not isinstance(quotes, list):
+            continue
+        for pool_q in quotes:
+            if isinstance(pool_q, str):
+                consider(pool_q, section_id=sid, enforce_section=not relaxed)
+
+    if not candidates or relaxed:
+        for entry in pool_entries:
+            sid = str(entry.get("section_id") or "")
+            quotes = entry.get("quotes")
+            if not isinstance(quotes, list):
+                continue
+            for pool_q in quotes:
+                if isinstance(pool_q, str):
+                    consider(pool_q, section_id=sid, enforce_section=False)
+
+    for section in source_sections:
+        if not isinstance(section, dict):
+            continue
+        sid = str(section.get("id") or section.get("title") or "")
+        body = str(section.get("body") or "")
+        for cand in _section_quote_candidates(body):
+            consider(cand, section_id=sid, enforce_section=not relaxed)
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    return candidates[0][2]
+
+
+def quote_is_literal(quote: str, sections: list[dict[str, Any]]) -> bool:
+    """True when quote appears verbatim in a section body."""
+    cleaned = quote.strip()
+    if not cleaned:
+        return False
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        body = str(section.get("body") or "")
+        if cleaned in body:
+            return True
+    return False
+
+
+def repair_quotes(
+    result: dict[str, Any],
+    *,
+    source_sections: list[dict[str, Any]],
+    quote_pool: list[dict[str, Any]] | None = None,
+    relaxed: bool = False,
+) -> int:
+    """Repair paraphrased or truncated evidence.quote using quote_pool / source text."""
+    repaired = 0
+    for _, finding in iter_findings(result):
+        evidence = finding.get("evidence")
+        if not isinstance(evidence, dict):
+            continue
+        quote = str(evidence.get("quote") or "").strip()
+        if not quote:
+            continue
+        if quote_matches(quote, source_sections) > 0:
+            continue
+        section_hint = str(finding.get("section") or "").strip() or None
+        text_hint = str(finding.get("text") or "").strip()
+        canonical = _best_quote(
+            quote,
+            section_hint=section_hint,
+            text_hint=text_hint,
+            source_sections=source_sections,
+            quote_pool=quote_pool,
+            relaxed=relaxed,
+        )
+        if canonical and canonical != quote:
+            evidence["quote"] = canonical
+            repaired += 1
+    return repaired
 
 
 def iter_findings(result: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:

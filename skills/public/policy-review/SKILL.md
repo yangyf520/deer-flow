@@ -26,7 +26,11 @@ the only user-visible outputs: a Chinese Markdown report and a JSON result file.
    again after a successful `policy_prepare` (it already retrieved). If you must
    re-retrieve, pass the original prepare `sections` (`title`+`body`) — never pass
    `section_results`. Copy every `evidence.quote` **verbatim** from
-   `quote_pool.quotes`. Cite only ids shown in `evidence_digest` for that section.
+   `quote_pool.quotes` for the matching `section_id`; if unsure, pick the longest
+   pool quote that contains your anchor phrase. Cite only ids shown in
+   `evidence_digest` for that section. Systematically walk **every** section in
+   `evidence_digest` and report each medium/high gap you can ground — do not stop
+   after the first few hits.
 3. **Finalize** — Immediately call `policy_finalize` with **`draft` as a JSON
    string** (not a nested object)::
 
@@ -47,6 +51,8 @@ document content.
 - The document under review is not itself policy authority; cite only this turn's
   `evidence_digest` / `allowed_ids`.
 - `evidence.quote` must be copied verbatim from the matching `quote_pool.quotes`.
+  Never paraphrase, summarize, or shorten with ellipsis — the server validates
+  against source text and will reject non-contiguous quotes.
 - medium / high findings with non-low confidence must cite an id from
   `evidence_digest` for that section.
 - high findings need a suggestion; provide `edit` when the text can be patched

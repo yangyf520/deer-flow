@@ -18,7 +18,13 @@ from deerflow.policy_review.contract import (
     parse_draft,
 )
 from deerflow.policy_review.render import render_report
-from deerflow.policy_review.validate import allowed_ids_from_packs, iter_findings, validate_review
+from deerflow.policy_review.validate import (
+    _section_matches,
+    allowed_ids_from_packs,
+    iter_findings,
+    repair_quotes,
+    validate_review,
+)
 
 # Section title carries primary signal; body budget must cover mid-document PRD clauses.
 SECTION_BODY_CHARS = 2000
@@ -41,8 +47,10 @@ SECTION_HEADING_RE = re.compile(
 )
 QUOTE_MIN = 8
 QUOTE_MAX = 180
-QUOTE_POOL_CAP = 8
+QUOTE_MAX_LONG = 280
+QUOTE_POOL_CAP = 12
 SENTENCE_SPLIT = re.compile(r"(?<=[。！？；;.!?])\s*")
+SECTION_LINE_RE = re.compile(r"^(?:§[\d\.]+|[\d]+(?:\.[\d]+)*[\.\、\s])")
 
 
 @dataclass
@@ -279,6 +287,15 @@ def extract_quote_candidates(body: str, *, cap: int = QUOTE_POOL_CAP) -> list[st
         out.append(q)
         return len(out) >= cap
 
+    # Prefer section-prefixed lines (e.g. §1.5 …) — common PRD anchors.
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or not SECTION_LINE_RE.match(stripped):
+            continue
+        candidate = stripped if len(stripped) <= QUOTE_MAX_LONG else stripped[:QUOTE_MAX_LONG]
+        if add(candidate, require_unique=False) and len(out) >= cap:
+            return out
+
     for part in parts:
         if len(part) <= QUOTE_MAX:
             candidate = part
@@ -295,6 +312,15 @@ def extract_quote_candidates(body: str, *, cap: int = QUOTE_POOL_CAP) -> list[st
             candidate = part if len(part) <= QUOTE_MAX else part[:QUOTE_MAX]
             if add(candidate, require_unique=False):
                 return out
+
+    # Longer spans help when models truncate mid-sentence with ellipsis.
+    if len(out) < cap:
+        for part in parts:
+            if len(part) <= QUOTE_MIN:
+                continue
+            candidate = part if len(part) <= QUOTE_MAX_LONG else part[:QUOTE_MAX_LONG]
+            if add(candidate, require_unique=False) and len(out) >= cap:
+                break
     return out
 
 
@@ -312,6 +338,41 @@ def build_quote_pool(sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return pool
+
+
+def slim_quote_pool(
+    pool: list[dict[str, Any]] | None,
+    *,
+    max_quotes: int = 6,
+    max_chars: int = 200,
+    section_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Compact quote_pool for model-facing payloads (full pool stays in artifact)."""
+    out: list[dict[str, Any]] = []
+    for entry in pool or []:
+        if not isinstance(entry, dict):
+            continue
+        sid = str(entry.get("section_id") or "").strip()
+        if section_ids and sid and sid not in section_ids:
+            matched = any(_section_matches(sid, wanted) or _section_matches(wanted, sid) for wanted in section_ids)
+            if not matched:
+                continue
+        quotes = entry.get("quotes")
+        if not isinstance(quotes, list):
+            continue
+        trimmed: list[str] = []
+        for quote in quotes[:max_quotes]:
+            if not isinstance(quote, str):
+                continue
+            q = quote.strip()
+            if not q:
+                continue
+            if len(q) > max_chars:
+                q = q[:max_chars].rstrip() + "…"
+            trimmed.append(q)
+        if trimmed:
+            out.append({"section_id": sid, "quotes": trimmed})
+    return out
 
 
 def trim_snippet(text: str, *, limit: int = DIGEST_SNIPPET_CHARS) -> str:
@@ -1044,6 +1105,7 @@ def finalize_review(
     retrieval_empty: bool = False,
     strict: bool = True,
     source_sections: list[dict[str, Any]] | None = None,
+    quote_pool: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], ValidationOutcome]:
     """
     Validate business rules, enrich citations, render report, set validation block.
@@ -1074,13 +1136,33 @@ def finalize_review(
     normalize_draft(result, packs)
 
     empty = retrieval_empty or (ids is not None and len(ids) == 0)
-    errors, warnings = validate_review(
-        result,
-        ids,
-        strict=strict,
-        retrieval_empty=empty,
-        source_sections=source_sections,
-    )
+    sections = source_sections if isinstance(source_sections, list) else None
+    if sections:
+        repair_quotes(result, source_sections=sections, quote_pool=quote_pool)
+        errors, warnings = validate_review(
+            result,
+            ids,
+            strict=strict,
+            retrieval_empty=empty,
+            source_sections=source_sections,
+        )
+        if any("quote not found" in err for err in errors):
+            repair_quotes(result, source_sections=sections, quote_pool=quote_pool, relaxed=True)
+            errors, warnings = validate_review(
+                result,
+                ids,
+                strict=strict,
+                retrieval_empty=empty,
+                source_sections=source_sections,
+            )
+    else:
+        errors, warnings = validate_review(
+            result,
+            ids,
+            strict=strict,
+            retrieval_empty=empty,
+            source_sections=source_sections,
+        )
 
     if not errors:
         enrich_citations(result, packs)

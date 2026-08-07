@@ -622,6 +622,7 @@ def run_finalize(
             retrieval_empty=bool(session.get("retrieval_empty")),
             strict=True,
             source_sections=source if isinstance(source, list) else [],
+            quote_pool=quote_pool if isinstance(quote_pool, list) else None,
         )
         if not allow_retry and outcome.status != "pass":
             return deliver_result(

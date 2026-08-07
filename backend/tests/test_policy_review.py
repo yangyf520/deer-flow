@@ -29,14 +29,14 @@ from deerflow.policy_review.pipeline import (
 from deerflow.policy_review.validate import validate_review
 
 
-def test_section_query_accepts_section_results_shape():
+def test_section_query_results():
     """Model may re-feed section_results (section_id + query) into retrieve."""
     assert section_query({"section_id": "section-1", "query": "密钥管理\n范围"}) == "密钥管理\n范围"
     assert section_query({"id": "s1", "title": "范围", "body": "正文"}) == "范围\n正文"
     assert section_query({}) == ""
 
 
-def test_prepare_sections_splits_bold_headings_when_single_blob(tmp_path, monkeypatch):
+def test_prepare_bold_split(tmp_path, monkeypatch):
     from deerflow.utils.file_conversion import ParseResult
 
     doc = tmp_path / "prd.docx"
@@ -57,7 +57,7 @@ def test_prepare_sections_splits_bold_headings_when_single_blob(tmp_path, monkey
     assert any("功能需求" in title for title in titles)
 
 
-def test_split_markdown_into_sections_recognizes_bold_headings():
+def test_split_bold_headings():
     text = "**一、背景**\n\n第一段。\n\n**1.1 范围**\n\n第二段。\n\n**普通加粗不是标题**\n\n第三段。\n"
     sections = split_markdown_into_sections(text)
     assert len(sections) == 2
@@ -72,7 +72,7 @@ def test_looks_like_section_heading():
     assert not looks_like_section_heading("这是一段很长的正文标题不应该被识别为章节标题因为实在太长了")
 
 
-def test_resolve_policy_review_top_k_prefers_broad_default():
+def test_resolve_top_k():
     assert resolve_policy_review_top_k(None) >= 20
     assert resolve_policy_review_top_k(12) == 12
     assert resolve_policy_review_top_k(100) == 50
@@ -91,7 +91,7 @@ def test_doc_ids_from_packs():
 
 
 @pytest.mark.asyncio
-async def test_supplement_missing_space_documents_adds_anchor_queries():
+async def test_supplement_anchors():
     doc_a = SimpleNamespace(id="doc-a", title="生成式人工智能服务管理暂行办法", source_filename="a.pdf")
     doc_b = SimpleNamespace(id="doc-b", title="中华人民共和国个人信息保护法", source_filename="b.pdf")
 
@@ -153,7 +153,7 @@ async def test_supplement_missing_space_documents_adds_anchor_queries():
     search.assert_awaited_once()
 
 
-def test_prepare_sections_falls_back_when_docling_unavailable(tmp_path, monkeypatch):
+def test_prepare_docling_fallback(tmp_path, monkeypatch):
     from deerflow.utils.file_conversion import ParseResult
 
     doc = tmp_path / "policy.docx"
@@ -173,7 +173,7 @@ def test_prepare_sections_falls_back_when_docling_unavailable(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_retrieve_skips_empty_query_without_calling_search():
+async def test_retrieve_skips_empty():
     search = AsyncMock()
     with patch("deerflow.knowledge.service.search", search):
         out = await retrieve_for_sections(
@@ -251,7 +251,7 @@ def _source(body: str = "前文。原文摘录。后文。") -> list[dict]:
 class TestPolicyReview:
     """Core finalize + multi-lane retrieve."""
 
-    def test_finalize_passes_with_grounded_citations(self):
+    def test_finalize_grounded(self):
         draft = _minimal_draft()
         result, outcome = finalize_review(draft, evidence_packs=[_pack()], source_sections=_source())
         assert outcome.status == "pass"
@@ -272,7 +272,7 @@ class TestPolicyReview:
         assert refs[0]["citable_as"] == "PIPL / 第1条"
         assert refs[0]["snippet"] == "…"
 
-    def test_spaces_from_packs_dedupes_in_order(self):
+    def test_spaces_dedupe(self):
         from deerflow.policy_review.pipeline import spaces_from_packs
 
         packs = [
@@ -282,7 +282,7 @@ class TestPolicyReview:
         ]
         assert spaces_from_packs(packs) == ["legal", "hr"]
 
-    def test_humanize_error_maps_schema_and_flow_noise(self):
+    def test_humanize_errors(self):
         from deerflow.policy_review.render import humanize_error
 
         assert "发现项缺少完整说明" in humanize_error("$.dimensions[0].findings[0].text: Field required")
@@ -290,7 +290,7 @@ class TestPolicyReview:
         # Bare JSONPath / English schema noise → generic business label
         assert humanize_error("$.audit.pipeline_stages: value is not a valid list") == ("预审结果未通过机器校验，请按报告说明处理后重新预审。")
 
-    def test_report_sanitizes_snippet_noise_and_uses_tables(self):
+    def test_report_sanitize(self):
         from deerflow.policy_review.render import render_report, sanitize_snippet
 
         dirty = "## 最终产品：\n| 文件名称 | x |\n| --- | --- |\n核心保密数据定义。"
@@ -321,7 +321,7 @@ class TestPolicyReview:
         assert "## 最终产品" not in report
         assert "### 处置结论" not in report
 
-    def test_report_orders_findings_by_risk_and_states_disposition(self):
+    def test_report_risk_order(self):
         from deerflow.policy_review.render import render_report
 
         draft = _minimal_draft(overall="high")
@@ -360,7 +360,7 @@ class TestPolicyReview:
         # Overview table lists high before detail sections; detail headings keep order.
         assert report.find("| 高 |") != -1 or "总体风险" in report
 
-    def test_finalize_fills_missing_dimension_risk(self):
+    def test_finalize_dim_risk(self):
         draft = _minimal_draft(overall="medium")
         del draft["dimensions"][0]["risk"]
         del draft["overall_risk"]
@@ -370,7 +370,7 @@ class TestPolicyReview:
         assert result["overall_risk"] == "medium"
         assert result["schema_hint"] == "legal-review.v1"
 
-    def test_finalize_normalizes_ids_and_parties_shape(self):
+    def test_finalize_normalize_ids(self):
         draft = _minimal_draft(overall="low")
         dim = draft["dimensions"][0]
         del dim["id"]
@@ -394,7 +394,7 @@ class TestPolicyReview:
         assert "audit" not in result["dimensions"][0]["findings"][0]
         assert "parties" not in result
 
-    def test_finalize_coerces_citation_id_alias(self):
+    def test_finalize_cite_alias(self):
         draft = _minimal_draft(cite_id=None, overall="high")
         finding = draft["dimensions"][0]["findings"][0]
         finding["suggestion"] = "必须整改"
@@ -406,13 +406,13 @@ class TestPolicyReview:
         assert cites and cites[0]["id"] == "ev-1"
         assert "citation_id" not in result["dimensions"][0]["findings"][0]
 
-    def test_rejects_hallucinated_citation(self):
+    def test_rejects_bad_cite(self):
         draft = _minimal_draft(cite_id="fake-id")
         _, outcome = finalize_review(draft, evidence_packs=[_pack()], source_sections=_source())
         assert outcome.status == "fail"
         assert any("fake-id" in e for e in outcome.errors)
 
-    def test_finalize_does_not_guess_missing_citation(self):
+    def test_finalize_no_guess_cite(self):
         draft = _minimal_draft(cite_id=None, overall="medium")
         result, outcome = finalize_review(draft, evidence_packs=[_pack()], source_sections=_source())
         finding = result["dimensions"][0]["findings"][0]
@@ -420,13 +420,13 @@ class TestPolicyReview:
         assert finding["citations"] == []
         assert any("needs citation id" in error for error in outcome.errors)
 
-    def test_finalize_requires_source_for_strict_validation(self):
+    def test_finalize_needs_source(self):
         draft = _minimal_draft()
         _, outcome = finalize_review(draft, evidence_packs=[_pack()])
         assert outcome.status == "fail"
         assert any("source_sections are required" in error for error in outcome.errors)
 
-    def test_high_risk_finalize_passes(self):
+    def test_high_risk_passes(self):
         draft = _minimal_draft(overall="high")
         draft["dimensions"][0]["findings"][0]["suggestion"] = "必须整改"
         result, outcome = finalize_review(draft, evidence_packs=[_pack()], source_sections=_source())
@@ -435,7 +435,7 @@ class TestPolicyReview:
         assert result["human_review"]["status"] == "not_required"
         assert "必须整改" in result["report"]
 
-    def test_high_risk_requires_suggestion(self):
+    def test_high_risk_needs_suggestion(self):
         draft = _minimal_draft(overall="high")
         draft["dimensions"][0]["findings"][0]["suggestion"] = None
         result, outcome = finalize_review(draft, evidence_packs=[_pack()], source_sections=_source())
@@ -443,13 +443,13 @@ class TestPolicyReview:
         assert any("requires suggestion" in error for error in outcome.errors)
         assert result["dimensions"][0]["findings"][0]["suggestion"] is None
 
-    def test_empty_retrieval_blocks_conviction_without_cites(self):
+    def test_empty_retrieval_refusal(self):
         draft = _minimal_draft(cite_id=None, overall="medium")
         draft["dimensions"][0]["findings"][0]["risk"] = "medium"
         errors, _ = validate_review(draft, set(), retrieval_empty=True)
         assert any("needs citation id" in e for e in errors)
 
-    def test_finalize_keeps_replace_edit(self):
+    def test_finalize_replace_edit(self):
         draft = _minimal_draft()
         draft["dimensions"][0]["findings"][0]["edit"] = {
             "op": "replace",
@@ -474,7 +474,7 @@ class TestPolicyReview:
         assert edit["op"] == "none"
         assert edit.get("text") is None
 
-    def test_finalize_rejects_edit_without_text_and_strips(self):
+    def test_finalize_rejects_empty_edit(self):
         draft = _minimal_draft()
         draft["dimensions"][0]["findings"][0]["edit"] = {"op": "replace", "text": ""}
         result, outcome = finalize_review(draft, evidence_packs=[_pack()], source_sections=_source())
@@ -482,7 +482,7 @@ class TestPolicyReview:
         assert any("edit.text" in e for e in outcome.errors)
         assert result["dimensions"][0]["findings"][0]["edit"] == {"op": "none", "text": None}
 
-    def test_finalize_rejects_quote_not_in_source(self):
+    def test_finalize_bad_quote(self):
         draft = _minimal_draft()
         draft["dimensions"][0]["findings"][0]["edit"] = {
             "op": "replace",
@@ -497,7 +497,7 @@ class TestPolicyReview:
         assert any("quote not found" in error for error in outcome.errors)
         assert result["dimensions"][0]["findings"][0]["edit"]["op"] == "none"
 
-    def test_finalize_grounds_quote_against_markdown_source(self):
+    def test_finalize_md_quote(self):
         draft = _minimal_draft()
         draft["dimensions"][0]["findings"][0]["evidence"]["quote"] = "加密算法：仅支持AES_256、SM4两种选项"
         draft["dimensions"][0]["findings"][0]["edit"] = {
@@ -513,7 +513,48 @@ class TestPolicyReview:
         assert outcome.status == "pass"
         assert result["dimensions"][0]["findings"][0]["edit"]["op"] == "replace"
 
-    def test_finalize_rejects_ambiguous_edit_anchor(self):
+    def test_repair_truncated_quote(self):
+        full_quote = "§1.5 舆论属性/社会动员能力研判：判定本模块具备舆论属性/社会动员能力，需满足《生成式人工智能服务管理暂行办法》第17条关于安全评估与算法备案的相关要求。"
+        body = f"前文。\n\n{full_quote}\n\n后文。"
+        truncated = "§1.5 舆论属性/社会动员能力研判：……判定本模块具备舆论属性/社会动员能力……"
+        draft = _minimal_draft()
+        draft["dimensions"][0]["findings"][0]["evidence"]["quote"] = truncated
+        draft["dimensions"][0]["findings"][0]["section"] = "§1.5"
+        draft["dimensions"][0]["findings"][0]["risk"] = "high"
+        draft["dimensions"][0]["findings"][0]["suggestion"] = "补充备案方案"
+        pool = [{"section_id": "section-1", "quotes": [full_quote]}]
+        result, outcome = finalize_review(
+            draft,
+            evidence_packs=[_pack()],
+            source_sections=_source(body),
+            quote_pool=pool,
+        )
+        assert outcome.status == "pass"
+        assert result["dimensions"][0]["findings"][0]["evidence"]["quote"] == full_quote
+
+    def test_repair_ellipsis_quote(self):
+        body = "§7.2 宣传/应急部门端交互流程：简报文档首段明确标注以下内容由AI基于公开信息自动生成，用于内部参考，请勿直接对外引用或发布。"
+        truncated = "§7.2 宣传/应急部门端交互流程：简报文档首段明确标注以下内容由AI基于公开信息自动生成……"
+        draft = _minimal_draft()
+        draft["dimensions"][0]["findings"][0]["evidence"]["quote"] = truncated
+        draft["dimensions"][0]["findings"][0]["section"] = "§7.2"
+        draft["dimensions"][0]["findings"][0]["risk"] = "high"
+        draft["dimensions"][0]["findings"][0]["suggestion"] = "补充处置流程"
+        result, outcome = finalize_review(
+            draft,
+            evidence_packs=[_pack()],
+            source_sections=_source(body),
+            quote_pool=[{"section_id": "§7.2", "quotes": [body]}],
+        )
+        assert outcome.status == "pass"
+        assert result["dimensions"][0]["findings"][0]["evidence"]["quote"] == body
+
+    def test_quote_pool_section_lines(self):
+        body = "普通段落。\n§4.2 决策类功能属性说明：诉求分类与舆情敏感度分级本质上是决策类功能。\n另一段。"
+        quotes = extract_quote_candidates(body)
+        assert any("§4.2" in quote for quote in quotes)
+
+    def test_finalize_rejects_ambiguous_edit(self):
         draft = _minimal_draft()
         draft["dimensions"][0]["findings"][0]["edit"] = {
             "op": "replace",
@@ -528,7 +569,7 @@ class TestPolicyReview:
         assert any("requires a unique" in error for error in outcome.errors)
         assert result["dimensions"][0]["findings"][0]["edit"]["op"] == "none"
 
-    def test_finalize_tool_uses_retrieve_artifact(self):
+    def test_finalize_tool_artifact(self):
         from langchain_core.messages import AIMessage, ToolMessage
         from langgraph.graph import END
         from langgraph.types import Command
@@ -571,7 +612,7 @@ class TestPolicyReview:
         assert "制度预审报告" in messages[1].content
         assert "schema_hint" not in messages[1].content
 
-    def test_finalize_accepts_flat_findings_json_string(self):
+    def test_finalize_flat_json(self):
         from langchain_core.messages import ToolMessage
         from langgraph.types import Command
 
@@ -662,7 +703,7 @@ class TestPolicyReview:
         assert isinstance(cmd, Command)
         assert cmd.update["messages"][0].artifact["review_status"] == "machine_passed"
 
-    def test_finalize_tool_retries_before_user_delivery(self):
+    def test_finalize_tool_retry(self):
         from langchain_core.messages import AIMessage, ToolMessage
         from langgraph.graph import END
         from langgraph.types import Command
@@ -709,7 +750,7 @@ class TestPolicyReview:
         assert msgs_last[0].artifact["review_status"] == "machine_failed"
         assert "制度预审报告" in msgs_last[1].content
 
-    def test_finalize_tool_tolerates_trailing_junk_and_object_draft(self):
+    def test_finalize_tool_junk(self):
         from langchain_core.messages import ToolMessage
         from langgraph.types import Command
 
@@ -754,7 +795,7 @@ class TestPolicyReview:
         assert isinstance(cmd4, Command)
         assert cmd4.update["messages"][0].artifact["review_status"] == "machine_passed"
 
-    def test_finalize_tool_delivers_parse_error_without_retry_loop(self):
+    def test_finalize_tool_parse_err(self):
         from langchain_core.messages import ToolMessage
         from langgraph.graph import END
         from langgraph.types import Command
@@ -787,7 +828,7 @@ class TestPolicyReview:
         assert cmd.update["messages"][0].artifact["review_status"] == "machine_failed"
 
     @pytest.mark.asyncio
-    async def test_prepare_tool_resolves_upload_and_parses(self, tmp_path, monkeypatch):
+    async def test_prepare_tool_upload(self, tmp_path, monkeypatch):
         from langgraph.types import Command
 
         from deerflow.config import paths as paths_mod
@@ -876,7 +917,7 @@ class TestPolicyReview:
             monkeypatch.setattr(paths_mod, "_paths", None)
 
     @pytest.mark.asyncio
-    async def test_prepare_tool_defaults_to_uploaded_files(self, tmp_path, monkeypatch):
+    async def test_prepare_default_upload(self, tmp_path, monkeypatch):
         from langgraph.types import Command
 
         from deerflow.config import paths as paths_mod
@@ -965,7 +1006,7 @@ class TestPolicyReview:
             monkeypatch.setattr(paths_mod, "_paths", None)
 
     @pytest.mark.asyncio
-    async def test_prepare_tool_rejects_path_outside_thread(self, tmp_path, monkeypatch):
+    async def test_prepare_rejects_path(self, tmp_path, monkeypatch):
         from deerflow.config import paths as paths_mod
         from deerflow.config.paths import Paths
         from deerflow.policy_review.tools import prepare_tool
@@ -998,7 +1039,7 @@ class TestPolicyReview:
             reset_current_user(token)
             monkeypatch.setattr(paths_mod, "_paths", None)
 
-    def test_rejects_duplicate_finding_ids(self):
+    def test_rejects_dup_ids(self):
         draft = _minimal_draft()
         draft["dimensions"][0]["findings"].append(
             {
@@ -1026,7 +1067,7 @@ class TestPolicyReview:
         assert "mystery" not in result["dimensions"][0]["findings"][0]
 
     @pytest.mark.asyncio
-    async def test_retrieve_parallel_spaces_merge(self):
+    async def test_retrieve_parallel(self):
         from deerflow.config.knowledge_config import (
             KnowledgeConfig,
             KnowledgeScenarioConfig,
@@ -1133,13 +1174,13 @@ class TestPolicyReview:
         assert digest_ids == {"law-1", "co-1", "ref-1", "case-1"}
         assert all("snippet" in ev for ev in out["evidence_digest"][0]["evidence"])
 
-    def test_merge_sections_caps_retrieve_fanout(self):
+    def test_merge_sections_cap(self):
         sections = [{"id": f"section-{index}", "title": f"§{index}", "body": f"正文{index}。"} for index in range(1, 25)]
         merged = merge_sections(sections)
         assert len(merged) == 16
         assert all(section["id"].startswith("section-") for section in merged)
 
-    def test_evidence_digest_exposes_snippets(self):
+    def test_digest_snippets(self):
         section_results = [{"section_id": "s1", "hit_count": 2}]
         packs = [
             {
@@ -1166,7 +1207,7 @@ class TestPolicyReview:
         assert digest[0]["evidence"][0]["snippet"]
         assert digest[0]["evidence"][0]["citable_as"] == "PIPL / 第1条"
 
-    def test_quote_pool_and_scaffold_are_stable(self):
+    def test_quote_pool_stable(self):
         sections = [
             {
                 "id": "section-1",
@@ -1186,7 +1227,7 @@ class TestPolicyReview:
         assert empty["refusal"]["reason"] == "empty_retrieval"
 
     @pytest.mark.asyncio
-    async def test_retrieve_tool_delegates_agent_scope_to_search(self):
+    async def test_retrieve_tool_scope(self):
         from langchain_core.messages import ToolMessage
         from langgraph.types import Command
 
@@ -1250,7 +1291,7 @@ class TestPolicyReview:
         assert session["sections"][0]["title"] == "s"
 
     @pytest.mark.asyncio
-    async def test_retrieve_async_restores_prior_prepare_sections(self):
+    async def test_retrieve_restore_sections(self):
         """Body-less section_results reuse prior prepare sections for quote_pool."""
         from langchain_core.messages import ToolMessage
 
@@ -1342,7 +1383,7 @@ class TestPolicyReview:
         assert result["quote_pool"][0]["quotes"]
 
     @pytest.mark.asyncio
-    async def test_retrieve_async_restores_body_before_search(self):
+    async def test_retrieve_restore_body(self):
         """Body-less section_results reuse prior prepare sections when re-searching."""
         from langchain_core.messages import ToolMessage
 
@@ -1419,7 +1460,7 @@ class TestPolicyReview:
         assert captured["sections"] == prior_sections
         assert captured["sections"][1]["body"]
 
-    def test_finalize_gate_includes_quote_pool_on_quote_errors(self):
+    def test_finalize_gate_pool(self):
         from langchain_core.messages import ToolMessage
         from langgraph.types import Command
 
@@ -1473,7 +1514,7 @@ class TestPolicyReview:
 class TestPolicyFlow:
     """Once prepare/retrieve starts, force finalize; prose is a last-resort nudge."""
 
-    def test_idle_until_policy_tool_starts(self):
+    def test_idle_before_policy(self):
         from langchain.agents.middleware.types import ModelRequest
         from langchain_core.language_models.fake_chat_models import FakeListChatModel
         from langchain_core.messages import AIMessage, HumanMessage
@@ -1518,7 +1559,7 @@ class TestPolicyFlow:
         )
         assert bind_next_step(request) is request
 
-    def test_force_finalize_after_prepare(self):
+    def test_force_finalize(self):
         from langchain.agents.middleware.types import ModelRequest
         from langchain_core.language_models.fake_chat_models import FakeListChatModel
         from langchain_core.messages import HumanMessage, ToolMessage
@@ -1556,7 +1597,7 @@ class TestPolicyFlow:
         assert bound.tool_choice == "policy_finalize"
         assert bound.model_settings.get("parallel_tool_calls") is False
 
-    def test_after_model_ignores_tool_calls(self):
+    def test_after_model_tool_calls(self):
         """after_model does not clear in-flight tool calls; wrap_model_call gates tools."""
         from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -1586,7 +1627,7 @@ class TestPolicyFlow:
         }
         assert mw.after_model(state, runtime=SimpleNamespace()) is None
 
-    def test_nudge_after_prepare_goes_to_finalize(self):
+    def test_nudge_to_finalize(self):
         from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
         from deerflow.policy_review.flow import PolicyFlowMiddleware, next_step
@@ -1638,7 +1679,7 @@ class TestPolicyFlow:
         assert reminder.name == REMINDER_NAME
         assert "policy_finalize" in reminder.content
 
-    def test_salvage_broken_finalize_without_llm_round(self):
+    def test_salvage_finalize(self):
         from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
         from deerflow.policy_review.flow import PolicyFlowMiddleware
@@ -1771,7 +1812,7 @@ class TestPolicyFlow:
         assert out["jump_to"] == "end"
         assert out["messages"][0].content == ""
 
-    def test_exit_after_chinese_status_deliver(self):
+    def test_exit_cn_deliver(self):
         from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
         from deerflow.policy_review.flow import PolicyFlowMiddleware, finalize_delivered
