@@ -3,9 +3,9 @@
     "career-recruitment": {
       "enabled": true,
       "type": "http",
-      "url": "http://10.199.56.34:8010/mcp",
+      "url": "$MCP_SERVER_CAREER_RECRUITMENT",
       "headers": {
-        "X-API-Key": "$RECRUITMENT_MCP_API_KEY"
+        "X-API-Key": "$MCP_API_KEY_CAREER_RECRUITMENT"
       },
       "description": "只读公开招聘职位搜索与职位详情",
       "tool_name_prefix": true,
@@ -18,7 +18,8 @@
           "岗位",
           "社招",
           "校招",
-          "公开职位"
+          "职位",
+          "人才"
         ]
       }
     }
