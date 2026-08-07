@@ -42,7 +42,8 @@ other `/api/*` go straight to the Gateway REST routers. See
 deer-flow/
 ├── Makefile                        # Root orchestration: drives the full stack (dev/start/stop, docker, setup)
 ├── config.example.yaml             # Template → copy to config.yaml (gitignored) at repo root
-├── extensions_config.example.json  # Template → copy to extensions_config.json (gitignored): MCP servers + skills
+├── extensions_config.example.json  # Template for the MCP servers + skills configuration
+├── extensions_config.json          # Image-default MCP servers + skills configuration for this deployment
 ├── backend/                        # Python backend — see backend/AGENTS.md
 │   ├── Makefile                    # Per-module backend commands (dev, gateway, test, lint, migrate-rev)
 │   ├── packages/harness/           # deerflow-harness package (import: deerflow.*) — agent framework
@@ -58,10 +59,12 @@ deer-flow/
 ```
 
 Runtime config lives at the **repo root**: copy `config.example.yaml` → `config.yaml`
-(main app config) and `extensions_config.example.json` → `extensions_config.json` (MCP
-servers + skills). Both real files are gitignored and may be edited at runtime via the
-Gateway API. Config schema and resolution order are documented in
-[backend/AGENTS.md](backend/AGENTS.md).
+(main app config), while `extensions_config.json` supplies the image-default MCP
+servers + skills configuration for this deployment. The backend image places it at
+`/app/backend/extensions_config.json`; Docker Compose volumes and Helm ConfigMap
+mounts at that path override the image copy. Keep credentials in deployment secrets
+and use whole-value environment-variable placeholders in the JSON. Config schema and
+resolution order are documented in [backend/AGENTS.md](backend/AGENTS.md).
 
 Skill quality review note:
 - `skills/public/skill-reviewer/` is the built-in read-only skill quality reviewer.

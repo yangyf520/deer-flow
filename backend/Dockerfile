@@ -51,6 +51,9 @@ COPY config.example.yaml ./config.yaml
 RUN --mount=type=bind,source=.,target=/context,ro \
     if [ -f /context/config.yaml ]; then cp /context/config.yaml ./config.yaml; fi
 RUN cp ./config.yaml ./backend/config.yaml
+# Bake the committed MCP/skills configuration into the image as a default.
+# Runtime Docker/Helm mounts may still override this file for each environment.
+COPY extensions_config.json ./backend/extensions_config.json
 
 # Install dependencies with cache mount.
 # `redis` is always installed because Docker Compose defaults the stream bridge
@@ -79,6 +82,7 @@ ENV LC_ALL=C.UTF-8
 ENV PYTHONIOENCODING=utf-8
 ENV DEER_FLOW_PROJECT_ROOT=/app
 ENV DEER_FLOW_CONFIG_PATH=/app/config.yaml
+ENV DEER_FLOW_EXTENSIONS_CONFIG_PATH=/app/backend/extensions_config.json
 
 # ── Stage 2: Dev ──────────────────────────────────────────────────────────────
 # Retains compiler toolchain from builder so startup-time `uv sync` can build
@@ -101,6 +105,7 @@ ENV LC_ALL=C.UTF-8
 ENV PYTHONIOENCODING=utf-8
 ENV DEER_FLOW_PROJECT_ROOT=/app
 ENV DEER_FLOW_CONFIG_PATH=/app/config.yaml
+ENV DEER_FLOW_EXTENSIONS_CONFIG_PATH=/app/backend/extensions_config.json
 
 # Copy Node.js runtime from builder (provides npx for MCP servers)
 COPY --from=builder /usr/bin/node /usr/bin/node

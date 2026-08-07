@@ -363,6 +363,13 @@ deploy.sh start              # start pre-built images
 deploy.sh down
 ```
 
+The backend image includes the repository's `extensions_config.json` as the
+default MCP/skill configuration at `/app/backend/extensions_config.json`.
+Docker Compose volumes and Helm ConfigMap mounts at that path take precedence,
+so environment-specific deployments must keep the mounted content in sync.
+Keep credentials in deployment secrets and reference them from the JSON via
+whole-value environment-variable placeholders.
+
 ### Advanced
 #### Sandbox Mode
 
