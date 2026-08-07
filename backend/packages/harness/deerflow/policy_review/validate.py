@@ -46,7 +46,8 @@ FULLWIDTH_PUNCT = str.maketrans(
         "\u2019": "'",
     }
 )
-SENTENCE_SPLIT = re.compile(r"(?<=[。！？；;.!?])\s*")
+# Do not split on `.` — it breaks section ids like §3.5 and 1.2.a.
+SENTENCE_SPLIT = re.compile(r"(?<=[。！？；;])\s*")
 
 
 def normalize_quote(text: str) -> str:
@@ -70,7 +71,14 @@ def _section_matches(hint: str | None, section_id: str) -> bool:
     return bool(hint_norm and sid_norm and (hint_norm in sid_norm or sid_norm in hint_norm))
 
 
-def _quote_score(needle: str, candidate: str, *, text_hint: str = "", min_ratio: float = 0.35) -> int:
+def _quote_score(
+    needle: str,
+    candidate: str,
+    *,
+    text_hint: str = "",
+    min_ratio: float = 0.35,
+    min_block: int | None = None,
+) -> int:
     """Score how well candidate matches model quote (+ optional finding text)."""
     needle_norm = normalize_quote(needle)
     cand_norm = normalize_quote(candidate)
@@ -80,14 +88,19 @@ def _quote_score(needle: str, candidate: str, *, text_hint: str = "", min_ratio:
         return len(needle_norm) * 1000 + len(cand_norm)
     if cand_norm in needle_norm:
         return len(cand_norm) * 1000
-    hint_norm = normalize_quote(text_hint)
-    combined = needle_norm + hint_norm if hint_norm else needle_norm
-    ratio = SequenceMatcher(None, combined, cand_norm).ratio()
-    if hint_norm:
-        ratio = max(ratio, SequenceMatcher(None, needle_norm, cand_norm).ratio())
-    if ratio < min_ratio:
-        return 0
-    return int(ratio * 10000) + min(len(needle_norm), len(cand_norm))
+    block_floor = min_block if min_block is not None else max(8, len(needle_norm) // 4)
+    best = 0
+    for left in (needle_norm + normalize_quote(text_hint), needle_norm):
+        if not left:
+            continue
+        match = SequenceMatcher(None, left, cand_norm).find_longest_match(0, len(left), 0, len(cand_norm))
+        if match.size < block_floor:
+            continue
+        coverage = match.size / max(len(needle_norm), 1)
+        ratio = SequenceMatcher(None, left, cand_norm).ratio()
+        if coverage >= min_ratio or ratio >= min_ratio:
+            best = max(best, int(max(coverage, ratio) * 10000) + match.size)
+    return best
 
 
 def _body_quotes(body: str, *, cap: int = 16) -> list[str]:
@@ -146,6 +159,7 @@ def _best_quote(
         return None
 
     min_ratio = 0.28 if relaxed else 0.35
+    min_block = max(6, len(normalize_quote(quote)) // 5) if relaxed else None
     candidates: list[tuple[int, int, str]] = []
 
     def consider(candidate: str, section_id: str = "", *, enforce_section: bool) -> None:
@@ -156,9 +170,17 @@ def _best_quote(
             return
         if quote_matches(cleaned, source_sections) == 0:
             return
-        score = _quote_score(quote, cleaned, text_hint=text_hint, min_ratio=min_ratio)
+        score = _quote_score(
+            quote,
+            cleaned,
+            text_hint=text_hint,
+            min_ratio=min_ratio,
+            min_block=min_block,
+        )
         if score <= 0:
             return
+        if enforce_section and section_hint and section_id and _section_matches(section_hint, section_id):
+            score += 100_000
         candidates.append((score, len(cleaned), cleaned))
 
     pool_entries = [entry for entry in (quote_pool or []) if isinstance(entry, dict)]
@@ -191,7 +213,7 @@ def _best_quote(
 
     if not candidates:
         return None
-    candidates.sort(key=lambda item: (-item[0], item[1]))
+    candidates.sort(key=lambda item: (-item[0], -item[1]))
     return candidates[0][2]
 
 
@@ -207,6 +229,29 @@ def quote_is_literal(quote: str, sections: list[dict[str, Any]]) -> bool:
         if cleaned in body:
             return True
     return False
+
+
+def _quote_repairable(needle: str, candidate: str, *, text_hint: str = "", min_ratio: float = 0.35) -> bool:
+    """True when candidate is a defensible repair for the model-supplied quote."""
+    needle_norm = normalize_quote(needle)
+    cand_norm = normalize_quote(candidate)
+    if not needle_norm or not cand_norm:
+        return False
+    if needle_norm in cand_norm or cand_norm in needle_norm:
+        return True
+    limit = min(len(needle_norm), len(cand_norm))
+    prefix = 0
+    while prefix < limit and needle_norm[prefix] == cand_norm[prefix]:
+        prefix += 1
+    if prefix >= max(8, len(needle_norm) // 3):
+        return True
+    hint_norm = normalize_quote(text_hint)
+    combined = needle_norm + hint_norm if hint_norm else needle_norm
+    ratio = max(
+        SequenceMatcher(None, needle_norm, cand_norm).ratio(),
+        SequenceMatcher(None, combined, cand_norm).ratio(),
+    )
+    return ratio >= min_ratio
 
 
 def repair_quotes(
@@ -225,7 +270,9 @@ def repair_quotes(
         quote = str(evidence.get("quote") or "").strip()
         if not quote:
             continue
-        if quote_matches(quote, source_sections) > 0:
+        grounded = quote_matches(quote, source_sections) > 0
+        literal = quote_is_literal(quote, source_sections)
+        if grounded and literal:
             continue
         section_hint = str(finding.get("section") or "").strip() or None
         text_hint = str(finding.get("text") or "").strip()
@@ -237,9 +284,17 @@ def repair_quotes(
             quote_pool=quote_pool,
             relaxed=relaxed,
         )
-        if canonical and canonical != quote:
-            evidence["quote"] = canonical
-            repaired += 1
+        if not canonical or canonical == quote:
+            continue
+        if quote_matches(canonical, source_sections) == 0:
+            continue
+        if not quote_is_literal(canonical, source_sections):
+            continue
+        min_ratio = 0.28 if relaxed else 0.35
+        if not _quote_repairable(quote, canonical, text_hint=text_hint, min_ratio=min_ratio):
+            continue
+        evidence["quote"] = canonical
+        repaired += 1
     return repaired
 
 

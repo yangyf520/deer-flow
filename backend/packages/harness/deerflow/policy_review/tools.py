@@ -22,6 +22,7 @@ from deerflow.policy_review.pipeline import (
     prepare_sections,
     rebuild_retrieve_result,
     retrieve_for_sections,
+    slim_quote_pool,
 )
 from deerflow.tools.types import Runtime
 
@@ -158,7 +159,7 @@ def retry_to_model(
         ),
     }
     if quote_pool:
-        envelope["quote_pool"] = quote_pool
+        envelope["quote_pool"] = slim_quote_pool(quote_pool)
     if evidence_digest:
         envelope["evidence_digest"] = evidence_digest
     return Command(
@@ -351,7 +352,6 @@ def retrieve_model_view(result: dict[str, Any]) -> dict[str, Any]:
             "allowed_ids",
             "retrieval_empty",
             "section_results",
-            "quote_pool",
             "draft_scaffold",
             "scenario",
             "evidence_digest",
@@ -359,6 +359,9 @@ def retrieve_model_view(result: dict[str, Any]) -> dict[str, Any]:
         )
         if key in result
     }
+    pool = result.get("quote_pool")
+    if isinstance(pool, list):
+        view["quote_pool"] = slim_quote_pool(pool)
     if "evidence_digest" not in view and isinstance(result.get("packs"), list):
         from deerflow.policy_review.pipeline import build_evidence_digest
 

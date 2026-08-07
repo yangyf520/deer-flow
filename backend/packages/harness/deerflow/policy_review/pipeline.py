@@ -49,7 +49,7 @@ QUOTE_MIN = 8
 QUOTE_MAX = 180
 QUOTE_MAX_LONG = 280
 QUOTE_POOL_CAP = 12
-SENTENCE_SPLIT = re.compile(r"(?<=[。！？；;.!?])\s*")
+SENTENCE_SPLIT = re.compile(r"(?<=[。！？；;])\s*")
 SECTION_LINE_RE = re.compile(r"^(?:§[\d\.]+|[\d]+(?:\.[\d]+)*[\.\、\s])")
 
 

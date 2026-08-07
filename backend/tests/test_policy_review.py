@@ -23,6 +23,7 @@ from deerflow.policy_review.pipeline import (
     resolve_policy_review_top_k,
     retrieve_for_sections,
     section_query,
+    slim_quote_pool,
     split_markdown_into_sections,
     supplement_missing_space_documents,
 )
@@ -553,6 +554,30 @@ class TestPolicyReview:
         body = "普通段落。\n§4.2 决策类功能属性说明：诉求分类与舆情敏感度分级本质上是决策类功能。\n另一段。"
         quotes = extract_quote_candidates(body)
         assert any("§4.2" in quote for quote in quotes)
+
+    def test_repair_paraphrase(self):
+        body = "§3.5 数据跨境传输：所有境外回传数据须先完成脱敏处理并留存审计日志。"
+        paraphrase = "数据跨境传输需脱敏并留审计"
+        draft = _minimal_draft()
+        draft["dimensions"][0]["findings"][0]["evidence"]["quote"] = paraphrase
+        draft["dimensions"][0]["findings"][0]["section"] = "§3.5"
+        draft["dimensions"][0]["findings"][0]["text"] = "缺少跨境合规说明"
+        draft["dimensions"][0]["findings"][0]["risk"] = "high"
+        draft["dimensions"][0]["findings"][0]["suggestion"] = "补充合规条款"
+        result, outcome = finalize_review(
+            draft,
+            evidence_packs=[_pack()],
+            source_sections=_source(body),
+            quote_pool=[{"section_id": "§3.5", "quotes": [body]}],
+        )
+        assert outcome.status == "pass"
+        assert body in result["dimensions"][0]["findings"][0]["evidence"]["quote"]
+
+    def test_slim_pool(self):
+        pool = [{"section_id": "a", "quotes": ["x" * 300, "short"]}]
+        slim = slim_quote_pool(pool, max_quotes=1, max_chars=50)
+        assert len(slim[0]["quotes"]) == 1
+        assert slim[0]["quotes"][0].endswith("…")
 
     def test_finalize_rejects_ambiguous_edit(self):
         draft = _minimal_draft()
