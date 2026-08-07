@@ -3,7 +3,7 @@
     "career-recruitment": {
       "enabled": true,
       "type": "http",
-      "url": "$MCP_SERVER_EHR",
+      "url": "http://10.199.56.34:8010/mcp",
       "headers": {
         "X-API-Key": "5d9651cfd6650f7378cdf3f15f4753be083c089defb3303b8c878ab8f2604da2"
       },
