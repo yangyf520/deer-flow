@@ -1,4 +1,3 @@
-export * from "./catalog-host";
 export * from "./api";
 export { importDocument } from "./doc-embed";
 export * from "./doc-parse";

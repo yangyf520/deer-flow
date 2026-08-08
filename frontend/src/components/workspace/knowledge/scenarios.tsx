@@ -48,12 +48,12 @@ function ScenarioFormFields({
     <DialogFormSection title={kb.sectionBasic}>
       <DialogFieldGrid>
         <DialogInputField
-          label={kb.catalogScenarioCode}
+          label={kb.codeTableEntryCode}
           value={code}
           onChange={setCode}
-          placeholder={kb.catalogCodePlaceholder}
+          placeholder={kb.codeTableEntryCodePlaceholder}
           disabled={disabled === true || !codeEditable}
-          hint={codeEditable ? kb.catalogCodeHint : undefined}
+          hint={codeEditable ? kb.codeTableEntryCodeHint : undefined}
           error={codeError}
           autoCapitalize="none"
           autoCorrect="off"
@@ -61,10 +61,10 @@ function ScenarioFormFields({
           spellCheck={false}
         />
         <DialogInputField
-          label={kb.catalogFieldLabel}
+          label={kb.codeTableEntryLabel}
           value={label}
           onChange={setLabel}
-          placeholder={kb.catalogFieldLabelPlaceholder}
+          placeholder={kb.codeTableEntryLabelPlaceholder}
           disabled={disabled}
           autoFocus={autoFocusLabel}
         />
@@ -114,7 +114,7 @@ export function ScenarioCreateDialog({
       })}
       onConfirm={() => {
         if (!validCode) {
-          setCodeError(kb.catalogCodeInvalid);
+          setCodeError(kb.codeTableEntryCodeInvalid);
           return;
         }
         void onConfirm({ code: trimmedCode, label: trimmedLabel });
@@ -203,7 +203,7 @@ export function ScenarioEditDialog({
       <ConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        description={kb.catalogDeleteConfirm}
+        description={kb.codeTableDeleteConfirm}
         confirmLabel={deleteBusy ? t.common.loading : t.common.delete}
         confirmPending={deleteBusy}
         confirmVariant="destructive"
@@ -217,23 +217,23 @@ export function ScenarioEditDialog({
   );
 }
 
-interface CatalogHostSwitchDialogProps {
+interface CodeTableSpaceSwitchDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   spaces: Space[];
-  currentHostId: string | null;
+  currentHostSpaceId: string | null;
   busy: boolean;
   onConfirm: (hostSpaceId: string) => void | Promise<void>;
 }
 
-export function CatalogHostSwitchDialog({
+export function CodeTableSpaceSwitchDialog({
   open,
   onOpenChange,
   spaces,
-  currentHostId,
+  currentHostSpaceId,
   busy,
   onConfirm,
-}: CatalogHostSwitchDialogProps) {
+}: CodeTableSpaceSwitchDialogProps) {
   const { t } = useI18n();
   const kb = t.knowledge;
   const [targetId, setTargetId] = useState("");
@@ -241,15 +241,17 @@ export function CatalogHostSwitchDialog({
   useEffect(() => {
     if (!open) return;
     const fallback =
-      spaces.find((s) => s.id !== currentHostId)?.id ?? spaces[0]?.id ?? "";
+      spaces.find((s) => s.id !== currentHostSpaceId)?.id ??
+      spaces[0]?.id ??
+      "";
     setTargetId(fallback);
-  }, [currentHostId, open, spaces]);
+  }, [currentHostSpaceId, open, spaces]);
 
-  const currentSpace = spaces.find((s) => s.id === currentHostId);
+  const currentSpace = spaces.find((s) => s.id === currentHostSpaceId);
   const currentName = currentSpace?.name?.trim();
   let currentLabel = "—";
   if (currentName) currentLabel = currentName;
-  else if (currentHostId) currentLabel = currentHostId;
+  else if (currentHostSpaceId) currentLabel = currentHostSpaceId;
 
   return (
     <FormDialog
@@ -257,36 +259,36 @@ export function CatalogHostSwitchDialog({
       onOpenChange={onOpenChange}
       title={
         <>
-          {kb.catalogMigrateHostTitle}
+          {kb.codeTableMigrateSpaceTitle}
           <span className="text-muted-foreground ml-2 text-sm font-normal">
-            {kb.catalogMigrateHostDescription}
+            {kb.codeTableMigrateSpaceDescription}
           </span>
         </>
       }
       {...dialogSaveFooterProps(t.common, {
         busy,
-        disabled: !targetId.trim() || targetId === currentHostId,
-        saveLabel: kb.catalogSwitchSpace,
+        disabled: !targetId.trim() || targetId === currentHostSpaceId,
+        saveLabel: kb.codeTableSwitchSpace,
       })}
       onConfirm={() => {
         const next = targetId.trim();
-        if (!next || next === currentHostId) return;
+        if (!next || next === currentHostSpaceId) return;
         void onConfirm(next);
       }}
     >
       <DialogFormSection>
         <DialogFieldGrid>
-          {currentHostId ? (
-            <DialogSlotField label={kb.catalogMigrateHostCurrentLabel}>
+          {currentHostSpaceId ? (
+            <DialogSlotField label={kb.codeTableMigrateSpaceCurrentLabel}>
               <div className={readOnlyFieldClass}>{currentLabel}</div>
             </DialogSlotField>
           ) : null}
           <DialogSelectField
-            label={kb.catalogMigrateHostSelect}
+            label={kb.codeTableMigrateSpaceSelect}
             value={targetId}
             onValueChange={setTargetId}
             disabled={busy || spaces.length === 0}
-            placeholder={kb.catalogMigrateHostSelect}
+            placeholder={kb.codeTableMigrateSpaceSelect}
             options={spaces.map((space) => ({
               value: space.id,
               label: space.name?.trim() || space.id,

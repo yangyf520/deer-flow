@@ -34,7 +34,9 @@ export function FormField({
             <span className="sr-only">Field</span>
           )}
           {labelTrailing ? (
-            <div className="min-w-0 flex-1">{labelTrailing}</div>
+            <div className="flex min-w-0 flex-1 justify-end text-right">
+              {labelTrailing}
+            </div>
           ) : null}
         </div>
       ) : null}

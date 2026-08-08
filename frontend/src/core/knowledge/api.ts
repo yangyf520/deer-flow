@@ -56,7 +56,7 @@ export type ScenarioPack = {
   label?: string;
   /** Linked knowledge space id (defaults to scenario type). */
   space_id?: string;
-  /** Knowledge space that owns this catalog entry. */
+  /** Knowledge space that owns this code-table entry. */
   host_space_id?: string;
 };
 
@@ -88,7 +88,7 @@ export type KnowledgeTagGroup = {
   scenario?: string;
 };
 
-export type KnowledgeCatalogResponse = {
+export type KnowledgeCodeTable = {
   kinds: KnowledgeKind[];
   tags: KnowledgeTag[];
   tag_groups: KnowledgeTagGroup[];
@@ -218,12 +218,15 @@ export async function listScenarios(): Promise<ScenariosListResponse> {
   return readJson(res, "Failed to list scenarios");
 }
 
-export async function listCatalog(): Promise<KnowledgeCatalogResponse> {
+export async function listCodeTable(): Promise<KnowledgeCodeTable> {
   const res = await fetch(`${base()}/catalog`, withLocale());
-  return readJson(res, "Failed to load knowledge catalog");
+  return readJson(res, "Failed to load knowledge code table");
 }
 
-export async function migrateCatalogHost(hostSpaceId: string): Promise<{
+export async function migrateCodeTableHost(
+  hostSpaceId: string,
+  options?: { onlyUnassigned?: boolean },
+): Promise<{
   host_space_id: string;
   updated: number;
 }> {
@@ -232,10 +235,13 @@ export async function migrateCatalogHost(hostSpaceId: string): Promise<{
     withLocale({
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ host_space_id: hostSpaceId }),
+      body: JSON.stringify({
+        host_space_id: hostSpaceId,
+        only_unassigned: options?.onlyUnassigned === true,
+      }),
     }),
   );
-  return readJson(res, "Failed to migrate catalog host");
+  return readJson(res, "Failed to migrate code table host space");
 }
 
 export async function upsertScenario(

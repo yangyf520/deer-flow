@@ -30,8 +30,12 @@ import {
 import {
   AlertError,
   ConfirmDialog,
+  DateInput,
+  DialogFieldGrid,
   DialogFormSection,
   DialogInputField,
+  DialogSlotField,
+  DialogToggleField,
   FormDialog,
   InlineEmpty,
   ItemListInfiniteTail,
@@ -39,8 +43,13 @@ import {
   ItemRowStatusBadge,
   Shell,
   ShellHeader,
+  TimeInput,
+  dateInputLang,
   dialogSaveFooterProps,
   itemRowStatusToneFromValue,
+  joinLocalDateTime,
+  splitLocalDateTime,
+  type ItemRowStatusTone,
   useItemListInfiniteScroll,
 } from "@/components/component";
 import { workspacePageInsetXClass } from "@/components/component/styles";
@@ -66,12 +75,17 @@ import {
   deleteAllDocuments,
   deleteDocument,
   docIngestModeLabel,
+  documentEffectiveStatus,
+  type DocumentEffectiveStatus,
+  effectiveToLocalValue,
   getSpace,
   importDocument,
-  listCatalog,
+  listCodeTable,
   listDocumentChunks,
   listDocuments,
+  localValueToEffectiveTo,
   parseDocument,
+  readDocumentEnabled,
   resolveSegmentPrompt,
   structuredMarkdownFile,
   phaseLabel,
@@ -85,6 +99,7 @@ import {
   tagGroupsFromTags,
   updateDocument,
   importKindForSpace,
+  scenarioInHostSpace,
   type DocumentChunk,
   type KnowledgeDocument,
   type KnowledgeTagGroup,
@@ -99,12 +114,40 @@ const DOC_PAGE_SIZE = 20;
 const INGEST_POLL_MS = 3000;
 
 function ingestBadgeLabel(doc: KnowledgeDocument, t: KnowledgeT): string {
-  if (doc.status === "ready") return t.status.ready;
+  if (doc.status === "ready") {
+    return readDocumentEnabled(doc.attrs)
+      ? t.fieldDocumentAvailableYes
+      : t.fieldDocumentAvailableNo;
+  }
   if (doc.status === "failed") return t.status.failed;
   if (doc.job_phase === "embedding") return t.phase.embedding;
   if (doc.job_phase === "parsing") return t.phase.parsing;
   if (doc.job_phase === "queued") return t.phase.queued;
   return statusLabel(doc.status, t);
+}
+
+function ingestBadgeTone(doc: KnowledgeDocument) {
+  if (doc.status === "ready") {
+    return readDocumentEnabled(doc.attrs) ? "success" : "warning";
+  }
+  return itemRowStatusToneFromValue(doc.status);
+}
+
+function documentEffectiveBadgeLabel(
+  status: DocumentEffectiveStatus,
+  t: KnowledgeT,
+): string {
+  if (status === "expired") return t.documentEffectiveExpired;
+  if (status === "pending") return t.documentEffectivePending;
+  return t.documentEffectiveValid;
+}
+
+function documentEffectiveBadgeTone(
+  status: DocumentEffectiveStatus,
+): ItemRowStatusTone {
+  if (status === "expired") return "danger";
+  if (status === "pending") return "warning";
+  return "success";
 }
 
 function ingestDetail(doc: KnowledgeDocument, t: KnowledgeT): string | null {
@@ -116,15 +159,6 @@ function ingestDetail(doc: KnowledgeDocument, t: KnowledgeT): string | null {
   return [phaseLabel(doc.job_phase || "queued", t), pct]
     .filter(Boolean)
     .join(" ");
-}
-
-function sameTitleAsFilename(doc: KnowledgeDocument): boolean {
-  const title = doc.title.trim().toLowerCase();
-  const name = doc.source_filename.trim().toLowerCase();
-  if (!title || !name) return false;
-  if (title === name) return true;
-  const stem = name.replace(/\.[^.]+$/, "");
-  return title === stem;
 }
 
 function formatUploadedAt(
@@ -171,9 +205,12 @@ export default function KnowledgeSpaceDocumentsPage() {
   const [reindexTargetId, setReindexTargetId] = useState<string | null>(null);
   const [space, setSpace] = useState<Space | null>(null);
   const [scenarios, setScenarios] = useState<ScenarioPack[]>([]);
-  const [tagGroupsCatalog, setTagGroupsCatalog] = useState<KnowledgeTagGroup[]>(
-    [],
+  const spaceScenarios = useMemo(
+    () =>
+      scenarios.filter((scenario) => scenarioInHostSpace(scenario, spaceId)),
+    [scenarios, spaceId],
   );
+  const [tagGroups, setTagGroups] = useState<KnowledgeTagGroup[]>([]);
   const [docs, setDocs] = useState<KnowledgeDocument[]>([]);
   const [docsTotal, setDocsTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -211,7 +248,13 @@ export default function KnowledgeSpaceDocumentsPage() {
   );
   const [docToEdit, setDocToEdit] = useState<KnowledgeDocument | null>(null);
   const [editDocTitle, setEditDocTitle] = useState("");
+  const [editDocAvailable, setEditDocAvailable] = useState(true);
+  const [editDocExpiresAt, setEditDocExpiresAt] = useState("");
   const [editDocBusy, setEditDocBusy] = useState(false);
+  const editExpiresParts = useMemo(
+    () => splitLocalDateTime(editDocExpiresAt),
+    [editDocExpiresAt],
+  );
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
   const [deleteAllBusy, setDeleteAllBusy] = useState(false);
   const uploadAbortRef = useRef<AbortController | null>(null);
@@ -297,14 +340,14 @@ export default function KnowledgeSpaceDocumentsPage() {
   }, [spaceId]);
 
   useEffect(() => {
-    void listCatalog()
+    void listCodeTable()
       .then((res) => {
         setScenarios(res.scenarios);
-        setTagGroupsCatalog(res.tag_groups);
+        setTagGroups(res.tag_groups);
       })
       .catch(() => {
         setScenarios([]);
-        setTagGroupsCatalog([]);
+        setTagGroups([]);
       });
   }, []);
 
@@ -487,16 +530,21 @@ export default function KnowledgeSpaceDocumentsPage() {
   function openEditDocument(doc: KnowledgeDocument) {
     setDocToEdit(doc);
     setEditDocTitle(doc.title);
+    setEditDocAvailable(readDocumentEnabled(doc.attrs));
+    setEditDocExpiresAt(effectiveToLocalValue(doc.effective_to));
   }
 
-  async function onSaveDocumentTitle() {
+  async function onSaveDocument() {
     if (!docToEdit) return;
     const trimmed = editDocTitle.trim();
     if (!trimmed) return;
     setEditDocBusy(true);
     try {
+      const attrs = { ...(docToEdit.attrs ?? {}), enabled: editDocAvailable };
       const updated = await updateDocument(spaceId, docToEdit.id, {
         title: trimmed,
+        effective_to: localValueToEffectiveTo(editDocExpiresAt),
+        attrs,
       });
       setDocs((prev) =>
         prev.map((row) => (row.id === updated.id ? updated : row)),
@@ -582,7 +630,7 @@ export default function KnowledgeSpaceDocumentsPage() {
           href={`/workspace/knowledge/scenarios?host=${encodeURIComponent(spaceId)}`}
         >
           <TablePropertiesIcon className="size-3.5" />
-          {t.knowledge.catalogButton}
+          {t.knowledge.codeTableButton}
         </Link>
       </Button>
     </>
@@ -660,7 +708,7 @@ export default function KnowledgeSpaceDocumentsPage() {
               <ScenarioSelect
                 readOnly
                 value={boundScenarioType(space) ?? undefined}
-                scenarios={scenarios}
+                scenarios={spaceScenarios}
                 placeholder={t.knowledge.bindScenario}
               />
             }
@@ -699,9 +747,10 @@ export default function KnowledgeSpaceDocumentsPage() {
                   t.knowledge,
                   readDocIngestMode(d.id),
                 );
-                const showFilename = !sameTitleAsFilename(d);
                 const uploadedAt = formatUploadedAt(d.created_at, locale);
                 const uploader = uploaderLabel(d, user);
+                const effectiveStatus =
+                  d.status === "ready" ? documentEffectiveStatus(d) : null;
                 return (
                   <li
                     key={d.id}
@@ -733,10 +782,21 @@ export default function KnowledgeSpaceDocumentsPage() {
                         {[
                           <ItemRowStatusBadge
                             key="status"
-                            tone={itemRowStatusToneFromValue(d.status)}
+                            tone={ingestBadgeTone(d)}
                           >
                             {ingestBadgeLabel(d, t.knowledge)}
                           </ItemRowStatusBadge>,
+                          effectiveStatus ? (
+                            <ItemRowStatusBadge
+                              key="effective"
+                              tone={documentEffectiveBadgeTone(effectiveStatus)}
+                            >
+                              {documentEffectiveBadgeLabel(
+                                effectiveStatus,
+                                t.knowledge,
+                              )}
+                            </ItemRowStatusBadge>
+                          ) : null,
                           ingestModeLabel ? (
                             <Badge
                               key="ingest-mode"
@@ -746,7 +806,7 @@ export default function KnowledgeSpaceDocumentsPage() {
                               {ingestModeLabel}
                             </Badge>
                           ) : null,
-                          ...tagGroupsFromTags(d.tags, tagGroupsCatalog).map(
+                          ...tagGroupsFromTags(d.tags, tagGroups).map(
                             (groupId) => (
                               <Badge
                                 key={`tag-group-${groupId}`}
@@ -757,11 +817,6 @@ export default function KnowledgeSpaceDocumentsPage() {
                               </Badge>
                             ),
                           ),
-                          showFilename ? (
-                            <span key="file" className="truncate">
-                              {d.source_filename}
-                            </span>
-                          ) : null,
                           detail ? (
                             <span
                               key="detail"
@@ -878,7 +933,7 @@ export default function KnowledgeSpaceDocumentsPage() {
           busy: editDocBusy,
           disabled: !editDocTitle.trim(),
         })}
-        onConfirm={() => void onSaveDocumentTitle()}
+        onConfirm={() => void onSaveDocument()}
       >
         <DialogFormSection title={t.knowledge.sectionDocument}>
           <DialogInputField
@@ -888,6 +943,56 @@ export default function KnowledgeSpaceDocumentsPage() {
             disabled={editDocBusy}
             autoFocus={docToEdit != null}
           />
+        </DialogFormSection>
+
+        <DialogFormSection title={t.knowledge.sectionDocumentAvailability}>
+          <DialogFieldGrid>
+            <DialogToggleField
+              label={t.knowledge.fieldDocumentAvailable}
+              value={editDocAvailable ? "yes" : "no"}
+              onValueChange={(value) => setEditDocAvailable(value === "yes")}
+              disabled={editDocBusy}
+              items={[
+                { value: "yes", label: t.knowledge.fieldDocumentAvailableYes },
+                { value: "no", label: t.knowledge.fieldDocumentAvailableNo },
+              ]}
+            />
+            <DialogSlotField
+              label={t.knowledge.fieldDocumentExpiresAt}
+              labelTrailing={
+                <span className="text-muted-foreground truncate text-xs">
+                  {t.knowledge.fieldDocumentExpiresAtHint}
+                </span>
+              }
+            >
+              <div className="flex min-w-0 gap-2" lang={dateInputLang(locale)}>
+                <DateInput
+                  value={editExpiresParts.date}
+                  onChange={(nextDate) =>
+                    setEditDocExpiresAt(
+                      joinLocalDateTime(nextDate, editExpiresParts.time),
+                    )
+                  }
+                  disabled={editDocBusy}
+                  locale={locale}
+                  aria-label={t.knowledge.fieldDocumentExpiresAtDate}
+                  className="min-w-0 flex-1"
+                />
+                <TimeInput
+                  value={editExpiresParts.time}
+                  onChange={(nextTime) =>
+                    setEditDocExpiresAt(
+                      joinLocalDateTime(editExpiresParts.date, nextTime),
+                    )
+                  }
+                  disabled={editDocBusy}
+                  locale={locale}
+                  aria-label={t.knowledge.fieldDocumentExpiresAtTime}
+                  className="w-[7.5rem] shrink-0"
+                />
+              </div>
+            </DialogSlotField>
+          </DialogFieldGrid>
         </DialogFormSection>
       </FormDialog>
 

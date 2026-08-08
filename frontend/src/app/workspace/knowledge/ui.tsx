@@ -18,7 +18,7 @@ import {
   tagGroupLabel,
   type ScenarioPack,
   type SpaceAccessValue,
-  type TagGroupCatalogEntry,
+  type TagGroupEntry,
   type TagGroupId,
 } from "@/core/knowledge";
 import { cn } from "@/lib/utils";
@@ -232,7 +232,7 @@ export function UploadModeToggle({
 
 export function policyTagToggleItems(
   knowledge: Translations["knowledge"],
-  tagGroups: TagGroupCatalogEntry[],
+  tagGroups: TagGroupEntry[],
 ) {
   return tagGroups.map((group) => ({
     value: group.id,
@@ -243,7 +243,7 @@ export function policyTagToggleItems(
 type PolicyTagToggleProps = {
   value: TagGroupId[];
   onValueChange: (value: TagGroupId[]) => void;
-  tagGroups: TagGroupCatalogEntry[];
+  tagGroups: TagGroupEntry[];
   disabled?: boolean;
   className?: string;
   scrollable?: boolean;

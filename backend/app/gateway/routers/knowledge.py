@@ -96,7 +96,7 @@ async def list_scenarios(request: Request) -> ScenariosListResponse:
     locale = _request_locale(request)
     factory = _session_factory()
     async with factory() as session:
-        catalog = await kb_codes.kb_codes.get_knowledge_catalog_from_db(session, locale=locale)
+        catalog = await kb_codes.get_knowledge_catalog_from_db(session, locale=locale)
     return ScenariosListResponse(items=catalog.scenarios, total=len(catalog.scenarios))
 
 
@@ -108,7 +108,7 @@ async def list_catalog(request: Request) -> KnowledgeCatalogResponse:
     locale = _request_locale(request)
     factory = _session_factory()
     async with factory() as session:
-        return await kb_codes.kb_codes.get_knowledge_catalog_from_db(session, locale=locale)
+        return await kb_codes.get_knowledge_catalog_from_db(session, locale=locale)
 
 
 @router.post("/catalog/migrate-host", response_model=MigrateCatalogHostResponse)
@@ -123,7 +123,11 @@ async def migrate_catalog_host(
     async with factory() as session:
         from deerflow.knowledge.app.codes import migrate_catalog_host as migrate_host
 
-        updated = await migrate_host(session, host_space_id=body.host_space_id)
+        updated = await migrate_host(
+            session,
+            host_space_id=body.host_space_id,
+            only_unassigned=body.only_unassigned,
+        )
     return MigrateCatalogHostResponse(
         host_space_id=body.host_space_id.strip(),
         updated=updated,
@@ -138,7 +142,7 @@ async def list_kinds(request: Request) -> KindsListResponse:
     locale = _request_locale(request)
     factory = _session_factory()
     async with factory() as session:
-        catalog = await kb_codes.kb_codes.get_knowledge_catalog_from_db(session, locale=locale)
+        catalog = await kb_codes.get_knowledge_catalog_from_db(session, locale=locale)
     return KindsListResponse(items=catalog.kinds, total=len(catalog.kinds))
 
 
@@ -172,7 +176,7 @@ async def upsert_scenario(code: str, body: ScenarioDefinitionRequest, request: R
             scenario_code=body.code,
             label=body.label,
         )
-        catalog = await kb_codes.kb_codes.get_knowledge_catalog_from_db(session, locale=_request_locale(request))
+        catalog = await kb_codes.get_knowledge_catalog_from_db(session, locale=_request_locale(request))
     pack = next((s for s in catalog.scenarios if s.type == code), None)
     if pack is None:
         raise HTTPException(status_code=500, detail="scenario upsert failed")

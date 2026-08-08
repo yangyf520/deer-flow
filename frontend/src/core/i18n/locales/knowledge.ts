@@ -11,37 +11,38 @@ export type KnowledgeTranslations = {
   emptySpaces: string;
   spaceCount: string;
   createSpace: string;
-  catalogButton: string;
-  catalogTitle: string;
-  catalogDescription: string;
-  catalogListTitle: string;
-  catalogCountTotal: (count: number) => string;
-  catalogCountFiltered: (shown: number, total: number) => string;
-  catalogSearchPlaceholder: string;
-  catalogSearchEmpty: string;
-  catalogEmpty: string;
-  catalogKinds: string;
-  catalogTagGroups: string;
-  catalogScenarioCode: string;
-  catalogSpaceCode: string;
-  catalogSwitchSpace: string;
-  catalogAllSpaces: string;
-  catalogMigrateHostTitle: string;
-  catalogMigrateHostDescription: string;
-  catalogMigrateHostSelect: string;
-  catalogMigrateHostCurrentLabel: string;
-  catalogMigrateHostCurrent: (name: string) => string;
-  catalogMigrated: (count: number) => string;
-  catalogOpenSpace: string;
+  codeTableButton: string;
+  codeTableTitle: string;
+  codeTableDescription: string;
+  codeTableListTitle: string;
+  codeTableCountTotal: (count: number) => string;
+  codeTableCountFiltered: (shown: number, total: number) => string;
+  codeTableSearchPlaceholder: string;
+  codeTableSearchEmpty: string;
+  codeTableEmpty: string;
+  codeTablePickSpace: string;
+  codeTableKinds: string;
+  codeTableTagGroups: string;
+  codeTableEntryCode: string;
+  codeTableSpaceCode: string;
+  codeTableSwitchSpace: string;
+  codeTableAllSpaces: string;
+  codeTableMigrateSpaceTitle: string;
+  codeTableMigrateSpaceDescription: string;
+  codeTableMigrateSpaceSelect: string;
+  codeTableMigrateSpaceCurrentLabel: string;
+  codeTableMigrateSpaceCurrent: (name: string) => string;
+  codeTableMigrated: (count: number) => string;
+  codeTableOpenSpace: string;
   createScenario: string;
   editScenario: string;
-  catalogFieldLabel: string;
-  catalogFieldLabelPlaceholder: string;
-  catalogCodePlaceholder: string;
-  catalogCodeHint: string;
-  catalogCodeInvalid: string;
-  catalogDescriptionPlaceholder: string;
-  catalogDeleteConfirm: string;
+  codeTableEntryLabel: string;
+  codeTableEntryLabelPlaceholder: string;
+  codeTableEntryCodePlaceholder: string;
+  codeTableEntryCodeHint: string;
+  codeTableEntryCodeInvalid: string;
+  codeTableEntryDescriptionPlaceholder: string;
+  codeTableDeleteConfirm: string;
   scenarioCreated: string;
   scenarioUpdated: string;
   scenarioDeleted: string;
@@ -52,12 +53,23 @@ export type KnowledgeTranslations = {
   documentUpdated: string;
   sectionBasic: string;
   sectionDocument: string;
+  sectionDocumentAvailability: string;
   sectionUpload: string;
   sectionUploadFile: string;
   spaceUpdated: string;
   spaceDeleted: string;
   fieldName: string;
   fieldTitle: string;
+  fieldDocumentAvailable: string;
+  fieldDocumentAvailableYes: string;
+  fieldDocumentAvailableNo: string;
+  fieldDocumentExpiresAt: string;
+  fieldDocumentExpiresAtDate: string;
+  fieldDocumentExpiresAtTime: string;
+  fieldDocumentExpiresAtHint: string;
+  documentEffectiveValid: string;
+  documentEffectiveExpired: string;
+  documentEffectivePending: string;
   namePlaceholder: string;
   fieldDescription: string;
   descriptionPlaceholder: string;
@@ -196,48 +208,50 @@ export const knowledgeEnUS: KnowledgeTranslations = {
   emptySpaces: "No knowledge spaces yet",
   spaceCount: "{count} spaces",
   createSpace: "New space",
-  catalogButton: "Scenarios",
-  catalogTitle: "Catalog management",
-  catalogDescription:
-    "Maintain code-table entries for spaces and other modules.",
-  catalogListTitle: "Catalog management",
-  catalogCountTotal: (count) => `Catalog count ${count}`,
-  catalogCountFiltered: (shown, total) => `Catalog count ${shown} / ${total}`,
-  catalogSearchPlaceholder: "Search catalog…",
-  catalogSearchEmpty: "No matching catalog entries.",
-  catalogEmpty: "No catalog entries yet.",
-  catalogKinds: "Document kinds",
-  catalogTagGroups: "Tag groups",
-  catalogScenarioCode: "Code",
-  catalogSpaceCode: "Knowledge space",
-  catalogSwitchSpace: "Switch space",
-  catalogAllSpaces: "All spaces",
-  catalogMigrateHostTitle: "Switch knowledge space",
-  catalogMigrateHostDescription:
-    "Move all catalog entries to another knowledge space. Document spaces linked to each entry are unchanged.",
-  catalogMigrateHostSelect: "Target space",
-  catalogMigrateHostCurrentLabel: "Current space",
-  catalogMigrateHostCurrent: (name) => `Current: ${name}`,
-  catalogMigrated: (count) =>
+  codeTableButton: "Code table",
+  codeTableTitle: "Code table",
+  codeTableDescription:
+    "Manage code-table entries for the selected knowledge space. Each space maintains its own code table.",
+  codeTableListTitle: "Code table",
+  codeTableCountTotal: (count) => `Code table count ${count}`,
+  codeTableCountFiltered: (shown, total) =>
+    `Code table count ${shown} / ${total}`,
+  codeTableSearchPlaceholder: "Search code table…",
+  codeTableSearchEmpty: "No matching code-table entries.",
+  codeTableEmpty: "No code-table entries yet.",
+  codeTablePickSpace: "Select a knowledge space to manage its code table.",
+  codeTableKinds: "Document kinds",
+  codeTableTagGroups: "Tag groups",
+  codeTableEntryCode: "Code",
+  codeTableSpaceCode: "Knowledge space",
+  codeTableSwitchSpace: "Switch space",
+  codeTableAllSpaces: "All spaces",
+  codeTableMigrateSpaceTitle: "Switch knowledge space",
+  codeTableMigrateSpaceDescription:
+    "Move all code-table entries in this view to another knowledge space.",
+  codeTableMigrateSpaceSelect: "Target space",
+  codeTableMigrateSpaceCurrentLabel: "Current space",
+  codeTableMigrateSpaceCurrent: (name) => `Knowledge space: ${name}`,
+  codeTableMigrated: (count) =>
     count === 1
-      ? "Moved 1 catalog entry to the selected space"
-      : `Moved ${count} catalog entries to the selected space`,
-  catalogOpenSpace: "Open space",
+      ? "Moved 1 code-table entry to the selected space"
+      : `Moved ${count} code-table entries to the selected space`,
+  codeTableOpenSpace: "Open space",
   createScenario: "New entry",
   editScenario: "Edit entry",
-  catalogFieldLabel: "Display name",
-  catalogFieldLabelPlaceholder: "e.g. Policy review",
-  catalogCodePlaceholder: "e.g. finance-review",
-  catalogCodeHint:
+  codeTableEntryLabel: "Display name",
+  codeTableEntryLabelPlaceholder: "e.g. Policy review",
+  codeTableEntryCodePlaceholder: "e.g. finance-review",
+  codeTableEntryCodeHint:
     "Lowercase letters, numbers, and hyphens. Also used as the linked knowledge space id.",
-  catalogCodeInvalid:
+  codeTableEntryCodeInvalid:
     "Use lowercase letters, numbers, and hyphens (e.g. finance-review).",
-  catalogDescriptionPlaceholder: "What this entry is for",
-  catalogDeleteConfirm:
-    "Delete this catalog entry and its linked knowledge space? This cannot be undone.",
-  scenarioCreated: "Catalog entry created",
-  scenarioUpdated: "Catalog entry updated",
-  scenarioDeleted: "Catalog entry deleted",
+  codeTableEntryDescriptionPlaceholder: "What this entry is for",
+  codeTableDeleteConfirm:
+    "Delete this code-table entry and its linked knowledge space? This cannot be undone.",
+  scenarioCreated: "Code-table entry created",
+  scenarioUpdated: "Code-table entry updated",
+  scenarioDeleted: "Code-table entry deleted",
   fieldTopK: "Top K",
   fieldScore: "Score threshold",
   editSpace: "Edit space",
@@ -245,12 +259,23 @@ export const knowledgeEnUS: KnowledgeTranslations = {
   documentUpdated: "Document updated",
   sectionBasic: "Basics",
   sectionDocument: "Document",
+  sectionDocumentAvailability: "Availability",
   sectionUpload: "Upload",
   sectionUploadFile: "Select file",
   spaceUpdated: "Space updated",
   spaceDeleted: "Space deleted",
   fieldName: "Space ID",
   fieldTitle: "Title",
+  fieldDocumentAvailable: "Available",
+  fieldDocumentAvailableYes: "Yes",
+  fieldDocumentAvailableNo: "Disabled",
+  fieldDocumentExpiresAt: "Expires at",
+  fieldDocumentExpiresAtDate: "Date",
+  fieldDocumentExpiresAtTime: "Time",
+  fieldDocumentExpiresAtHint: "Leave empty for no expiration.",
+  documentEffectiveValid: "Valid",
+  documentEffectiveExpired: "Expired",
+  documentEffectivePending: "Not yet effective",
   namePlaceholder: "e.g. policy-reviewer",
   fieldDescription: "Description",
   descriptionPlaceholder: "What this space is for",
@@ -425,38 +450,40 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   emptySpaces: "还没有知识空间",
   spaceCount: "{count} 个空间",
   createSpace: "新建空间",
-  catalogButton: "场景管理",
-  catalogTitle: "码表管理",
-  catalogDescription: "维护知识库码表，供空间等业务模块选用。",
-  catalogListTitle: "码表管理",
-  catalogCountTotal: (count) => `码表数量 ${count}`,
-  catalogCountFiltered: (shown, total) => `码表数量 ${shown} / ${total}`,
-  catalogSearchPlaceholder: "检索码表信息…",
-  catalogSearchEmpty: "没有匹配的码表项。",
-  catalogEmpty: "暂无码表条目。",
-  catalogKinds: "文档分类",
-  catalogTagGroups: "标签组",
-  catalogScenarioCode: "编码",
-  catalogSpaceCode: "知识库",
-  catalogSwitchSpace: "切换知识库",
-  catalogAllSpaces: "全部知识库",
-  catalogMigrateHostTitle: "切换知识库",
-  catalogMigrateHostDescription:
-    "将全部码表条目迁移到所选知识库。各条目关联的文档空间不会变更。",
-  catalogMigrateHostSelect: "目标知识库",
-  catalogMigrateHostCurrentLabel: "当前知识库",
-  catalogMigrateHostCurrent: (name) => `当前：${name}`,
-  catalogMigrated: (count) => `已将 ${count} 条码表迁移至所选知识库`,
-  catalogOpenSpace: "打开知识库",
+  codeTableButton: "码表管理",
+  codeTableTitle: "码表管理",
+  codeTableDescription: "管理当前知识库下的码表，各知识库独立维护。",
+  codeTableListTitle: "码表管理",
+  codeTableCountTotal: (count) => `码表数量 ${count}`,
+  codeTableCountFiltered: (shown, total) => `码表数量 ${shown} / ${total}`,
+  codeTableSearchPlaceholder: "检索码表信息…",
+  codeTableSearchEmpty: "没有匹配的码表项。",
+  codeTableEmpty: "当前知识库暂无码表条目。",
+  codeTablePickSpace: "请先选择要管理的知识库。",
+  codeTableKinds: "文档分类",
+  codeTableTagGroups: "标签组",
+  codeTableEntryCode: "编码",
+  codeTableSpaceCode: "知识库",
+  codeTableSwitchSpace: "切换知识库",
+  codeTableAllSpaces: "全部知识库",
+  codeTableMigrateSpaceTitle: "切换知识库",
+  codeTableMigrateSpaceDescription: "将当前码表全部迁移到所选知识库。",
+  codeTableMigrateSpaceSelect: "目标知识库",
+  codeTableMigrateSpaceCurrentLabel: "当前知识库",
+  codeTableMigrateSpaceCurrent: (name) => `知识库：${name}`,
+  codeTableMigrated: (count) => `已将 ${count} 条码表迁移至所选知识库`,
+  codeTableOpenSpace: "打开知识库",
   createScenario: "新建码表",
   editScenario: "编辑码表",
-  catalogFieldLabel: "名称",
-  catalogFieldLabelPlaceholder: "例如：制度预审",
-  catalogCodePlaceholder: "例如：finance-review",
-  catalogCodeHint: "小写英文、数字与连字符；同时作为关联知识空间的编码。",
-  catalogCodeInvalid: "请使用小写英文、数字与连字符（如 finance-review）。",
-  catalogDescriptionPlaceholder: "此码表条目的用途",
-  catalogDeleteConfirm: "确定删除此码表条目及关联的知识库？此操作不可恢复。",
+  codeTableEntryLabel: "名称",
+  codeTableEntryLabelPlaceholder: "例如：制度预审",
+  codeTableEntryCodePlaceholder: "例如：finance-review",
+  codeTableEntryCodeHint:
+    "小写英文、数字与连字符；同时作为关联知识空间的编码。",
+  codeTableEntryCodeInvalid:
+    "请使用小写英文、数字与连字符（如 finance-review）。",
+  codeTableEntryDescriptionPlaceholder: "此码表条目的用途",
+  codeTableDeleteConfirm: "确定删除此码表条目及关联的知识库？此操作不可恢复。",
   scenarioCreated: "码表已创建",
   scenarioUpdated: "码表已更新",
   scenarioDeleted: "码表已删除",
@@ -467,12 +494,23 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   documentUpdated: "文档已更新",
   sectionBasic: "基本信息",
   sectionDocument: "文档属性",
+  sectionDocumentAvailability: "可用性",
   sectionUpload: "上传设置",
   sectionUploadFile: "文件选择",
   spaceUpdated: "空间已更新",
   spaceDeleted: "空间已删除",
   fieldName: "空间编号",
   fieldTitle: "名称",
+  fieldDocumentAvailable: "是否可用",
+  fieldDocumentAvailableYes: "可用",
+  fieldDocumentAvailableNo: "禁用",
+  fieldDocumentExpiresAt: "过期时间",
+  fieldDocumentExpiresAtDate: "日期",
+  fieldDocumentExpiresAtTime: "时分",
+  fieldDocumentExpiresAtHint: "留空表示永不过期",
+  documentEffectiveValid: "有效",
+  documentEffectiveExpired: "过期",
+  documentEffectivePending: "未生效",
   namePlaceholder: "例如：policy-reviewer",
   fieldDescription: "空间描述",
   descriptionPlaceholder: "这个空间的用途",

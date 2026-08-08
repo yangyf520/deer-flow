@@ -69,6 +69,30 @@ def doc_effective_at(row: Any, as_of: datetime) -> bool:
     return True
 
 
+def _metadata_enabled(meta: dict[str, Any]) -> bool:
+    enabled = meta.get("enabled")
+    if enabled is False:
+        return False
+    if isinstance(enabled, str) and enabled.strip().lower() in {"false", "0", "no"}:
+        return False
+    return True
+
+
+def metadata_retrieval_allowed(meta: dict[str, Any], as_of: datetime) -> bool:
+    if not _metadata_enabled(meta):
+        return False
+    eff_from = meta.get("effective_from")
+    eff_to = meta.get("effective_to")
+    if eff_from or eff_to:
+
+        class _Row:
+            effective_from = parse_as_of(eff_from)
+            effective_to = parse_as_of(eff_to)
+
+        return doc_effective_at(_Row(), as_of)
+    return True
+
+
 def clause_boost(
     item: dict[str, Any],
     anchors: list[str],
@@ -109,17 +133,7 @@ def rank_by_temporal(
     for item in items:
         copy = dict(item)
         meta = dict(copy.get("metadata") or {})
-        eff_from = meta.get("effective_from")
-        eff_to = meta.get("effective_to")
-        if eff_from or eff_to:
-
-            class _Row:
-                effective_from = parse_as_of(eff_from)
-                effective_to = parse_as_of(eff_to)
-
-            meta["temporal_valid"] = doc_effective_at(_Row(), as_of_dt)
-        else:
-            meta.setdefault("temporal_valid", True)
+        meta["temporal_valid"] = metadata_retrieval_allowed(meta, as_of_dt)
         if anchors:
             meta["clause_anchors"] = anchors
             meta["clause_hit"] = clause_boost(copy, anchors) > 0

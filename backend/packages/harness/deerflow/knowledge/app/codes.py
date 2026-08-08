@@ -643,8 +643,13 @@ async def rename_catalog_space_references(
             row.updated_at = _utcnow()
 
 
-async def migrate_catalog_host(session: AsyncSession, *, host_space_id: str) -> int:
-    """Assign all enabled catalog scenarios to a knowledge space (码表归属迁移)."""
+async def migrate_catalog_host(
+    session: AsyncSession,
+    *,
+    host_space_id: str,
+    only_unassigned: bool = False,
+) -> int:
+    """Assign catalog scenarios to a knowledge space (码表归属迁移)."""
     from fastapi import HTTPException
 
     target = (host_space_id or "").strip()
@@ -668,7 +673,10 @@ async def migrate_catalog_host(session: AsyncSession, *, host_space_id: str) -> 
     updated = 0
     for row in rows:
         attrs = dict(row.attrs or {})
-        if catalog_host_space_id(attrs) == target:
+        current_host = catalog_host_space_id(attrs)
+        if current_host == target:
+            continue
+        if only_unassigned and current_host:
             continue
         attrs["host_space_id"] = target
         row.attrs = _compact_scenario_attrs(attrs, code=row.code)

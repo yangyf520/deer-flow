@@ -47,12 +47,39 @@ from deerflow.knowledge.engine.search import (
     build_hybrid_retriever,
     merge_items_by_doc_buckets,
     merge_space_hits,
+    metadata_retrieval_allowed,
+    rank_by_temporal,
     resolve_scenario,
     retrieve_across_spaces,
     retrieve_in_space,
     space_budgets,
 )
 from deerflow.utils.file_conversion import sanitize_media
+
+
+def test_metadata_retrieval_allowed_respects_enabled_and_expiry():
+    from datetime import UTC, datetime
+
+    as_of = datetime(2026, 8, 8, 12, 0, tzinfo=UTC)
+    assert metadata_retrieval_allowed({"enabled": False}, as_of) is False
+    assert metadata_retrieval_allowed({"enabled": "false"}, as_of) is False
+    assert metadata_retrieval_allowed({"enabled": True}, as_of) is True
+    expired = {
+        "enabled": True,
+        "effective_to": "2026-08-01T00:00:00+00:00",
+    }
+    assert metadata_retrieval_allowed(expired, as_of) is False
+
+
+def test_rank_by_temporal_filters_disabled_documents():
+    from datetime import UTC, datetime
+
+    items = [
+        {"id": "a", "score": 1.0, "metadata": {"enabled": True}},
+        {"id": "b", "score": 0.9, "metadata": {"enabled": False}},
+    ]
+    ranked = rank_by_temporal(items, query="", as_of=datetime(2026, 8, 8, tzinfo=UTC))
+    assert [item["id"] for item in ranked] == ["a"]
 
 
 def test_pg_params_prefer_connection_string():

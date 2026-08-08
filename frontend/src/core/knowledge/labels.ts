@@ -4,8 +4,8 @@ import type { SpaceAccessValue, SpaceRoleValue } from "./api";
 
 type KnowledgeT = Translations["knowledge"];
 
-/** Tag group entry from knowledge catalog API. */
-export type TagGroupCatalogEntry = {
+/** Tag group entry from the knowledge code-table API. */
+export type TagGroupEntry = {
   id: string;
   tags: string[];
   label?: string;
@@ -32,8 +32,8 @@ export function scenarioSpaceId(scenario: {
   return linked;
 }
 
-/** Catalog owner knowledge space id (码表归属). */
-export function scenarioCatalogHostId(scenario: {
+/** Owner knowledge space id for a code-table scenario (码表归属). */
+export function scenarioHostSpaceId(scenario: {
   host_space_id?: string | null;
 }): string | null {
   const host = scenario.host_space_id?.trim();
@@ -41,15 +41,19 @@ export function scenarioCatalogHostId(scenario: {
   return host;
 }
 
-/** Whether a scenario belongs to the active catalog host (unassigned matches any host). */
-export function scenarioMatchesCatalogHost(
+export function scenarioUnassigned(scenario: {
+  host_space_id?: string | null;
+}): boolean {
+  return scenarioHostSpaceId(scenario) === null;
+}
+
+/** Whether a scenario belongs to the given knowledge space. */
+export function scenarioInHostSpace(
   scenario: { host_space_id?: string | null },
-  hostId: string | null,
+  hostSpaceId: string | null,
 ): boolean {
-  if (!hostId) return true;
-  const host = scenarioCatalogHostId(scenario);
-  if (!host) return true;
-  return host === hostId;
+  if (!hostSpaceId) return false;
+  return scenarioHostSpaceId(scenario) === hostSpaceId;
 }
 
 export function boundScenarioType(
@@ -214,7 +218,7 @@ export function tagLabel(tagId: string, t: KnowledgeT): string {
 export function tagGroupLabel(
   groupId: string,
   t: KnowledgeT,
-  entry?: Pick<TagGroupCatalogEntry, "label">,
+  entry?: Pick<TagGroupEntry, "label">,
 ): string {
   if (entry?.label?.trim()) return entry.label.trim();
   return t.tagGroups[groupId] ?? groupId;
@@ -222,10 +226,10 @@ export function tagGroupLabel(
 
 export function tagGroupsFromTags(
   tags: string[] | undefined,
-  catalog: TagGroupCatalogEntry[],
+  tagGroups: TagGroupEntry[],
 ): TagGroupId[] {
   const have = new Set(tags ?? []);
-  return catalog
+  return tagGroups
     .filter((g) => g.tags.some((t) => have.has(t)))
     .map((g) => g.id);
 }

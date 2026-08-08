@@ -2,7 +2,7 @@
 
 import { ArrowLeftRightIcon, SettingsIcon, Trash2Icon } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -21,28 +21,30 @@ import {
 } from "@/components/component";
 import { workspacePageInsetXClass } from "@/components/component/styles";
 import {
-  CatalogHostSwitchDialog,
+  CodeTableSpaceSwitchDialog,
   ScenarioCreateDialog,
   ScenarioEditDialog,
 } from "@/components/workspace/knowledge/scenarios";
 import { useI18n } from "@/core/i18n/hooks";
 import {
   deleteScenario,
-  listCatalog,
+  listCodeTable,
   listMySpaces,
-  migrateCatalogHost,
-  readStoredCatalogHost,
+  migrateCodeTableHost,
+  readStoredCodeTableSpace,
+  scenarioInHostSpace,
   scenarioLabel,
-  scenarioMatchesCatalogHost,
-  storeCatalogHost,
+  scenarioUnassigned,
+  spaceDisplayLabel,
+  storeCodeTableSpace,
   upsertScenario,
-  type KnowledgeCatalogResponse,
+  type KnowledgeCodeTable,
   type ScenarioPack,
   type Space,
 } from "@/core/knowledge";
 import { cn } from "@/lib/utils";
 
-function ScenarioCatalogCard({
+function ScenarioRow({
   scenario,
   onEdit,
   onDelete,
@@ -98,7 +100,7 @@ export default function KnowledgeScenariosPage() {
   let queryHost: string | null = null;
   if (hostParam && hostParam.length > 0) queryHost = hostParam;
   else if (spaceParam && spaceParam.length > 0) queryHost = spaceParam;
-  const [catalog, setCatalog] = useState<KnowledgeCatalogResponse | null>(null);
+  const [codeTable, setCodeTable] = useState<KnowledgeCodeTable | null>(null);
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -110,26 +112,28 @@ export default function KnowledgeScenariosPage() {
   const [scenarioToDelete, setScenarioToDelete] = useState<ScenarioPack | null>(
     null,
   );
-  const [hostSwitchOpen, setHostSwitchOpen] = useState(false);
-  const [hostSwitchBusy, setHostSwitchBusy] = useState(false);
+  const [spaceSwitchOpen, setSpaceSwitchOpen] = useState(false);
+  const [spaceSwitchBusy, setSpaceSwitchBusy] = useState(false);
+  const [attachBusy, setAttachBusy] = useState(false);
+  const attachAttemptRef = useRef<string | null>(null);
 
-  const catalogHostId = useMemo(() => {
+  const hostSpaceId = useMemo(() => {
     if (queryHost) return queryHost;
-    return readStoredCatalogHost();
+    return readStoredCodeTableSpace();
   }, [queryHost]);
 
   useEffect(() => {
     if (!queryHost) return;
-    storeCatalogHost(queryHost);
+    storeCodeTableSpace(queryHost);
   }, [queryHost]);
 
   const reload = useCallback(async () => {
     try {
-      const [catalogRes, spacesRes] = await Promise.all([
-        listCatalog(),
+      const [codeTableRes, spacesRes] = await Promise.all([
+        listCodeTable(),
         listMySpaces(),
       ]);
-      setCatalog(catalogRes);
+      setCodeTable(codeTableRes);
       setSpaces(spacesRes.items);
       setError(null);
     } catch (e) {
@@ -141,16 +145,16 @@ export default function KnowledgeScenariosPage() {
     void reload();
   }, [reload, locale]);
 
-  const scenarios = catalog?.scenarios ?? [];
-  const hostScenarios = useMemo(
-    () => scenarios.filter((s) => scenarioMatchesCatalogHost(s, catalogHostId)),
-    [catalogHostId, scenarios],
+  const scenarios = codeTable?.scenarios ?? [];
+  const spaceScenarios = useMemo(
+    () => scenarios.filter((s) => scenarioInHostSpace(s, hostSpaceId)),
+    [hostSpaceId, scenarios],
   );
 
   const q = query.trim().toLowerCase();
   const filtered = useMemo(() => {
-    if (!q) return hostScenarios;
-    return hostScenarios.filter((s) => {
+    if (!q) return spaceScenarios;
+    return spaceScenarios.filter((s) => {
       const label = scenarioLabel(s.type, kb, s).toLowerCase();
       return (
         s.type.toLowerCase().includes(q) ||
@@ -158,22 +162,60 @@ export default function KnowledgeScenariosPage() {
         (s.description?.toLowerCase().includes(q) ?? false)
       );
     });
-  }, [hostScenarios, kb, q]);
+  }, [spaceScenarios, kb, q]);
 
   const countLabel = useMemo(() => {
-    if (scenarios.length === 0) return undefined;
-    const total = hostScenarios.length;
-    if (q) return kb.catalogCountFiltered(filtered.length, total);
-    return kb.catalogCountTotal(total);
-  }, [filtered.length, hostScenarios.length, kb, q, scenarios.length]);
+    if (!hostSpaceId || spaceScenarios.length === 0) return undefined;
+    const total = spaceScenarios.length;
+    if (q) return kb.codeTableCountFiltered(filtered.length, total);
+    return kb.codeTableCountTotal(total);
+  }, [filtered.length, hostSpaceId, kb, q, spaceScenarios.length]);
 
-  const isEmpty = scenarios.length === 0 && !error;
-  const currentHostSpace = spaces.find((s) => s.id === catalogHostId);
+  useEffect(() => {
+    attachAttemptRef.current = null;
+  }, [hostSpaceId]);
 
-  function navigateToHost(hostId: string) {
-    storeCatalogHost(hostId);
+  useEffect(() => {
+    if (!hostSpaceId || codeTable === null || attachBusy) return;
+    if (attachAttemptRef.current === hostSpaceId) return;
+
+    const hasAssignedHere = scenarios.some((s) =>
+      scenarioInHostSpace(s, hostSpaceId),
+    );
+    const hasUnassigned = scenarios.some(scenarioUnassigned);
+    if (hasAssignedHere || !hasUnassigned) return;
+
+    attachAttemptRef.current = hostSpaceId;
+    let cancelled = false;
+    void (async () => {
+      setAttachBusy(true);
+      setError(null);
+      try {
+        await migrateCodeTableHost(hostSpaceId, { onlyUnassigned: true });
+        if (!cancelled) await reload();
+      } catch (e) {
+        attachAttemptRef.current = null;
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : String(e));
+        }
+      } finally {
+        if (!cancelled) setAttachBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [attachBusy, codeTable, hostSpaceId, reload, scenarios]);
+
+  const needsHost = !hostSpaceId && spaces.length > 0;
+  const isEmpty =
+    hostSpaceId != null && spaceScenarios.length === 0 && !error && !attachBusy;
+  const currentHostSpace = spaces.find((s) => s.id === hostSpaceId);
+
+  function navigateToHostSpace(spaceId: string) {
+    storeCodeTableSpace(spaceId);
     router.push(
-      `/workspace/knowledge/scenarios?host=${encodeURIComponent(hostId)}`,
+      `/workspace/knowledge/scenarios?host=${encodeURIComponent(spaceId)}`,
     );
   }
 
@@ -184,7 +226,7 @@ export default function KnowledgeScenariosPage() {
       await upsertScenario(input.code, {
         code: input.code,
         label: input.label,
-        host_space_id: catalogHostId ?? undefined,
+        host_space_id: hostSpaceId ?? undefined,
       });
       setCreateOpen(false);
       toast.success(kb.scenarioCreated);
@@ -238,49 +280,52 @@ export default function KnowledgeScenariosPage() {
     await removeScenario(editing);
   }
 
-  async function onMigrateCatalogHost(hostSpaceId: string) {
-    setHostSwitchBusy(true);
+  async function onMigrateCodeTableHost(targetSpaceId: string) {
+    setSpaceSwitchBusy(true);
     setError(null);
     try {
-      const res = await migrateCatalogHost(hostSpaceId);
-      setHostSwitchOpen(false);
-      toast.success(kb.catalogMigrated(res.updated));
+      const res = await migrateCodeTableHost(targetSpaceId);
+      setSpaceSwitchOpen(false);
+      toast.success(kb.codeTableMigrated(res.updated));
       await reload();
-      navigateToHost(res.host_space_id);
+      navigateToHostSpace(res.host_space_id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setHostSwitchBusy(false);
+      setSpaceSwitchBusy(false);
     }
   }
 
   const headerDescription =
-    catalogHostId && currentHostSpace
-      ? kb.catalogMigrateHostCurrent(
-          currentHostSpace.name?.trim() || catalogHostId,
+    hostSpaceId && currentHostSpace
+      ? kb.codeTableMigrateSpaceCurrent(
+          currentHostSpace.name?.trim() || hostSpaceId,
         )
-      : kb.catalogDescription;
+      : kb.codeTableDescription;
 
   return (
     <>
       <Shell
-        fillBody={isEmpty}
+        fillBody={isEmpty || attachBusy}
         header={
           <ShellHeader
             backHref="/workspace/knowledge"
-            title={kb.catalogTitle}
+            title={kb.codeTableTitle}
             description={headerDescription}
             actions={
               <>
                 {spaces.length > 0 ? (
                   <HeaderOutlineButton
                     leading={<ArrowLeftRightIcon className="size-3.5" />}
-                    onClick={() => setHostSwitchOpen(true)}
+                    onClick={() => setSpaceSwitchOpen(true)}
                   >
-                    {kb.catalogSwitchSpace}
+                    {kb.codeTableSwitchSpace}
                   </HeaderOutlineButton>
                 ) : null}
-                <HeaderCreateButton onClick={() => setCreateOpen(true)}>
+                <HeaderCreateButton
+                  onClick={() => setCreateOpen(true)}
+                  disabled={!hostSpaceId}
+                >
                   {kb.createScenario}
                 </HeaderCreateButton>
               </>
@@ -293,20 +338,41 @@ export default function KnowledgeScenariosPage() {
         <ItemListPanel
           countLabel={countLabel}
           toolbar={
-            scenarios.length > 0 ? (
+            hostSpaceId && spaceScenarios.length > 0 ? (
               <ListPanelToolbar>
                 <ListSearchField
                   value={query}
                   onChange={setQuery}
-                  placeholder={kb.catalogSearchPlaceholder}
+                  placeholder={kb.codeTableSearchPlaceholder}
                 />
               </ListPanelToolbar>
             ) : undefined
           }
         >
-          {isEmpty ? (
+          {needsHost ? (
             <PanelEmpty className="py-16">
-              <p className="text-foreground font-medium">{kb.catalogEmpty}</p>
+              <p className="text-foreground font-medium">
+                {kb.codeTablePickSpace}
+              </p>
+              <ul className="mt-4 flex flex-col gap-2">
+                {spaces.map((space) => (
+                  <li key={space.id}>
+                    <button
+                      type="button"
+                      className="text-primary text-sm font-medium hover:underline"
+                      onClick={() => navigateToHostSpace(space.id)}
+                    >
+                      {spaceDisplayLabel(space)}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </PanelEmpty>
+          ) : attachBusy ? (
+            <PanelEmpty className="py-16">{t.common.loading}</PanelEmpty>
+          ) : isEmpty ? (
+            <PanelEmpty className="py-16">
+              <p className="text-foreground font-medium">{kb.codeTableEmpty}</p>
               <button
                 type="button"
                 className="text-primary mt-3 text-sm font-medium hover:underline"
@@ -316,12 +382,12 @@ export default function KnowledgeScenariosPage() {
               </button>
             </PanelEmpty>
           ) : filtered.length === 0 ? (
-            <InlineEmpty className="p-6">{kb.catalogSearchEmpty}</InlineEmpty>
+            <InlineEmpty className="p-6">{kb.codeTableSearchEmpty}</InlineEmpty>
           ) : (
             <div className={cn(workspacePageInsetXClass, "pt-2 pb-3")}>
               <ul className="flex flex-col gap-3">
                 {filtered.map((scenario) => (
-                  <ScenarioCatalogCard
+                  <ScenarioRow
                     key={scenario.type}
                     scenario={scenario}
                     onEdit={setEditing}
@@ -354,13 +420,13 @@ export default function KnowledgeScenariosPage() {
         onDelete={onDeleteFromEditDialog}
       />
 
-      <CatalogHostSwitchDialog
-        open={hostSwitchOpen}
-        onOpenChange={setHostSwitchOpen}
+      <CodeTableSpaceSwitchDialog
+        open={spaceSwitchOpen}
+        onOpenChange={setSpaceSwitchOpen}
         spaces={spaces}
-        currentHostId={catalogHostId}
-        busy={hostSwitchBusy}
-        onConfirm={onMigrateCatalogHost}
+        currentHostSpaceId={hostSpaceId}
+        busy={spaceSwitchBusy}
+        onConfirm={onMigrateCodeTableHost}
       />
 
       <ConfirmDialog
@@ -369,7 +435,7 @@ export default function KnowledgeScenariosPage() {
           if (!open) setScenarioToDelete(null);
         }}
         title={t.common.delete}
-        description={kb.catalogDeleteConfirm}
+        description={kb.codeTableDeleteConfirm}
         confirmLabel={deleteBusy ? t.common.loading : t.common.delete}
         confirmPending={deleteBusy}
         confirmVariant="destructive"

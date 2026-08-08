@@ -28,3 +28,17 @@ export function storeDocIngestMode(docId: string, mode: UploadMode): void {
   if (typeof window === "undefined") return;
   sessionStorage.setItem(docStorageKey(docId), mode);
 }
+
+const codeTableSpaceKey = "deerflow:knowledge:code-table-space";
+
+export function readStoredCodeTableSpace(): string | null {
+  if (typeof window === "undefined") return null;
+  const raw = sessionStorage.getItem(codeTableSpaceKey)?.trim();
+  if (!raw) return null;
+  return raw;
+}
+
+export function storeCodeTableSpace(spaceId: string): void {
+  if (typeof window === "undefined") return;
+  sessionStorage.setItem(codeTableSpaceKey, spaceId.trim());
+}

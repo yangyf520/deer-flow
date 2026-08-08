@@ -115,6 +115,7 @@ class ScenarioDefinitionRequest(BaseModel):
 
 class MigrateCatalogHostRequest(BaseModel):
     host_space_id: str = Field(min_length=1)
+    only_unassigned: bool = False
 
 
 class MigrateCatalogHostResponse(BaseModel):

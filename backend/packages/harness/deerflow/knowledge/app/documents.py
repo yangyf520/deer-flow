@@ -559,8 +559,7 @@ async def update_document(
             meta_patch["effective_from"] = row.effective_from.isoformat()
     if effective_to is not None:
         row.effective_to = parse_as_of(str(effective_to).strip()) if str(effective_to).strip() else None
-        if row.effective_to is not None:
-            meta_patch["effective_to"] = row.effective_to.isoformat()
+        meta_patch["effective_to"] = row.effective_to.isoformat() if row.effective_to is not None else None
     if attrs is not None:
         merged_attrs = dict(row.attrs or {}) if isinstance(row.attrs, dict) else {}
         merged_attrs.update(merge_custom_metadata({}, attrs))

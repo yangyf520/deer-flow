@@ -50,6 +50,7 @@ function DialogFieldLayout({
   colSpan,
   fieldClassName,
   hint,
+  labelTrailing,
   error,
   children,
 }: {
@@ -57,12 +58,13 @@ function DialogFieldLayout({
   colSpan?: "full";
   fieldClassName?: string;
   hint?: ReactNode;
+  labelTrailing?: ReactNode;
   error?: string;
   children: ReactNode;
 }) {
   const footer = error ? (
     <p className="text-destructive text-xs">{error}</p>
-  ) : hint ? (
+  ) : hint && !labelTrailing ? (
     <p className="text-muted-foreground text-xs">{hint}</p>
   ) : null;
 
@@ -78,6 +80,7 @@ function DialogFieldLayout({
   return (
     <FormField
       label={label}
+      labelTrailing={labelTrailing}
       className={dialogFieldWrapClass(colSpan, fieldClassName)}
     >
       {children}
@@ -348,12 +351,14 @@ export function DialogFormSection({
 export function DialogSlotField({
   label,
   hint,
+  labelTrailing,
   children,
   colSpan,
   fieldClassName,
 }: {
   label: string;
   hint?: ReactNode;
+  labelTrailing?: ReactNode;
   children: ReactNode;
   colSpan?: "full";
   fieldClassName?: string;
@@ -364,6 +369,7 @@ export function DialogSlotField({
       colSpan={colSpan}
       fieldClassName={fieldClassName}
       hint={hint}
+      labelTrailing={labelTrailing}
     >
       {children}
     </DialogFieldLayout>
