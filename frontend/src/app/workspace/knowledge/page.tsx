@@ -241,6 +241,7 @@ export default function KnowledgeSpacesPage() {
                     key={s.id}
                     space={s}
                     onEdit={openEditSpace}
+                    agents={agents}
                     usingAgentNames={
                       agentUsageKnown ? (spaceAgentUsage[s.id] ?? []) : null
                     }

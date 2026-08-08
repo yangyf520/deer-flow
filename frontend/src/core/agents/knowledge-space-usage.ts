@@ -42,3 +42,17 @@ export function compactAgentUsageLabel(names: readonly string[]): {
   }
   return { text: `${names[0]} +${names.length - 1}`, title };
 }
+
+/** Tooltip title for bound agents: `name — description` when available. */
+export function agentUsageBadgeTitle(
+  names: readonly string[],
+  agents: readonly Agent[],
+): string {
+  const byName = new Map(agents.map((agent) => [agent.name, agent]));
+  return names
+    .map((name) => {
+      const description = byName.get(name)?.description?.trim();
+      return description ? `${name} — ${description}` : name;
+    })
+    .join(", ");
+}

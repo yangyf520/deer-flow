@@ -9,8 +9,17 @@ import {
 } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 
-import { CardAction, ItemCard, MetaPill } from "@/components/component";
-import { formatAgentUsageLabel } from "@/core/agents/knowledge-space-usage";
+import {
+  CardAction,
+  ItemCard,
+  ItemRowStatusBadge,
+  MetaPill,
+} from "@/components/component";
+import type { Agent } from "@/core/agents";
+import {
+  agentUsageBadgeTitle,
+  compactAgentUsageLabel,
+} from "@/core/agents/knowledge-space-usage";
 import { useI18n } from "@/core/i18n/hooks";
 import {
   accessHint,
@@ -26,6 +35,7 @@ interface SpaceCardProps {
   onEdit?: (space: Space) => void;
   /** Agent names bound to this space; `null` when agents API is off or still loading. */
   usingAgentNames?: string[] | null;
+  agents?: readonly Agent[];
 }
 
 const actionClass =
@@ -35,6 +45,7 @@ export function SpaceCard({
   space,
   onEdit,
   usingAgentNames = null,
+  agents = [],
 }: SpaceCardProps) {
   const { t } = useI18n();
   const kb = t.knowledge;
@@ -44,33 +55,49 @@ export function SpaceCard({
   const subtitle = spaceCardSubtitle(space, title);
 
   const metaTags = useMemo(() => {
-    const tags: ReactNode[] = [];
+    const access = accessLabel(space.access, kb);
+    const accessDetail = accessHint(space.access, kb);
+    const accessTag = (
+      <MetaPill key="access" size="row" hint={accessDetail ?? undefined}>
+        {access}
+      </MetaPill>
+    );
 
-    if (usingAgentNames && usingAgentNames.length > 0) {
-      const label = formatAgentUsageLabel(usingAgentNames);
-      tags.push(
-        <MetaPill
+    if (usingAgentNames === null) {
+      return [accessTag];
+    }
+
+    let agentTag: ReactNode;
+    if (usingAgentNames.length === 0) {
+      agentTag = (
+        <ItemRowStatusBadge key="agents" tone="warning">
+          {kb.noAgentsUsing}
+        </ItemRowStatusBadge>
+      );
+    } else {
+      const { text } = compactAgentUsageLabel(usingAgentNames);
+      agentTag = (
+        <ItemRowStatusBadge
           key="agents"
-          mono
-          size="row"
-          hint={label}
-          className="max-w-full min-w-0 shrink truncate"
+          tone="success"
+          className="w-auto max-w-[15ch] min-w-0 shrink font-mono"
+          title={agentUsageBadgeTitle(usingAgentNames, agents)}
         >
-          {label}
-        </MetaPill>,
+          <span className="block min-w-0 truncate">{text}</span>
+        </ItemRowStatusBadge>
       );
     }
 
-    const access = accessLabel(space.access, kb);
-    const accessDetail = accessHint(space.access, kb);
-    tags.push(
-      <MetaPill key="access" size="row" hint={accessDetail ?? undefined}>
-        {access}
-      </MetaPill>,
-    );
-
-    return tags;
-  }, [kb, space.access, usingAgentNames]);
+    return [
+      <div
+        key="meta"
+        className="flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden"
+      >
+        {agentTag}
+        {accessTag}
+      </div>,
+    ];
+  }, [agents, kb, space.access, usingAgentNames]);
 
   return (
     <ItemCard
@@ -79,7 +106,6 @@ export function SpaceCard({
       title={title}
       description={subtitle}
       metaTags={metaTags}
-      metaTagsLayout="inline-grow-leading"
       href={href}
       actions={
         <div

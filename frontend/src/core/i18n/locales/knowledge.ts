@@ -57,6 +57,7 @@ export type KnowledgeTranslations = {
   spaceUpdated: string;
   spaceDeleted: string;
   fieldName: string;
+  fieldTitle: string;
   namePlaceholder: string;
   fieldDescription: string;
   descriptionPlaceholder: string;
@@ -249,6 +250,7 @@ export const knowledgeEnUS: KnowledgeTranslations = {
   spaceUpdated: "Space updated",
   spaceDeleted: "Space deleted",
   fieldName: "Space ID",
+  fieldTitle: "Title",
   namePlaceholder: "e.g. policy-reviewer",
   fieldDescription: "Description",
   descriptionPlaceholder: "What this space is for",
@@ -260,7 +262,7 @@ export const knowledgeEnUS: KnowledgeTranslations = {
   selectAllowedKinds: "Select kind",
   bindScenario: "Bind scenario",
   unbound: "Unbound",
-  noAgentsUsing: "No agents",
+  noAgentsUsing: "Unused",
   documents: "Documents",
   eval: "Eval",
   grants: "Grants",
@@ -470,6 +472,7 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   spaceUpdated: "空间已更新",
   spaceDeleted: "空间已删除",
   fieldName: "空间编号",
+  fieldTitle: "名称",
   namePlaceholder: "例如：policy-reviewer",
   fieldDescription: "空间描述",
   descriptionPlaceholder: "这个空间的用途",
@@ -481,7 +484,7 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   selectAllowedKinds: "选择类型",
   bindScenario: "绑定场景",
   unbound: "未绑定",
-  noAgentsUsing: "暂无智能体使用",
+  noAgentsUsing: "未使用",
   documents: "文档",
   eval: "评测",
   grants: "授权",

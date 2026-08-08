@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 
 import {
+  agentUsageBadgeTitle,
   compactAgentUsageLabel,
   formatAgentUsageLabel,
   knowledgeSpaceAgentUsageMap,
@@ -60,5 +61,22 @@ describe("compactAgentUsageLabel", () => {
       text: "qa-helper +1",
       title: "qa-helper, recruit-helper",
     });
+  });
+});
+
+describe("agentUsageBadgeTitle", () => {
+  it("includes agent descriptions when available", () => {
+    expect(
+      agentUsageBadgeTitle(
+        ["qa-helper", "recruit-helper"],
+        [
+          agent("qa-helper", null),
+          {
+            ...agent("recruit-helper", null),
+            description: "Recruiting assistant",
+          },
+        ],
+      ),
+    ).toBe("qa-helper, recruit-helper — Recruiting assistant");
   });
 });
