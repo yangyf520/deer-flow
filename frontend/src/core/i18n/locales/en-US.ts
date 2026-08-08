@@ -524,20 +524,20 @@ export const enUS: Translations = {
     soulHint: "Personality, principles, and guardrails (Markdown)",
     soulGenerate: "AI generate",
     soulGenerateHint:
-      "Generate SOUL step by step through conversation, then apply it to the form.",
+      "Generate persona text in chat; confirming or closing writes it into the form (no SOUL.md file is created).",
     soulGenerating: "Generating…",
     soulGenerateError: "Failed to generate SOUL",
     soulGenerated: "SOUL generated — review and save when ready",
     soulDraftPageTitle: "AI persona builder",
     soulDraftBootstrapMessage:
-      "The agent name is {name}. {descriptionPart}Help me design its SOUL.md persona through conversation. Do not call setup_agent to save the agent — focus on designing SOUL only.",
+      "This is a chat-only task to design a persona (SOUL) for an agent named {name}. {descriptionPart}Ask a few clarifying questions first; when you have enough, output the full body in a ```markdown code block in your reply. Do not call any tools (including write_file, read_file, bash, setup_agent, update_agent). Do not create, read, or edit SOUL.md — the UI writes the text back into the form.",
     soulDraftDescriptionPart: "Description: {description}. ",
     soulDraftFinishMessage:
-      "Based on everything we discussed, output the final SOUL.md body. Output Markdown only, wrapped in a ```markdown code block. Do not call any tools.",
+      "Based on everything we discussed, output the final persona body in your reply. Markdown only, wrapped in a ```markdown code block. Do not call tools or touch files.",
     soulDraftConfirm: "Confirm SOUL",
     soulDraftConfirmTitle: "Confirm persona",
     soulDraftConfirmHint:
-      "This will fill the form. You can still edit before saving.",
+      "Confirming or closing writes this into the form. You can still edit before saving.",
     soulDraftReturn: "Confirm and return",
     soulDraftBackToChat: "Continue chat",
     soulDraftChatPlaceholder:

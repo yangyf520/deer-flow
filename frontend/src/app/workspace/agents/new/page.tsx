@@ -1,6 +1,5 @@
 "use client";
 
-import type { Message } from "@langchain/langgraph-sdk";
 import {
   ArrowLeftIcon,
   BotIcon,
@@ -32,6 +31,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   AGENT_SOUL_DRAFT_FORM_KEY,
   AGENT_SOUL_DRAFT_SOUL_KEY,
+  extractLatestAssistantSoul,
 } from "@/components/workspace/agents/agents";
 import { ArtifactsProvider } from "@/components/workspace/artifacts";
 import { MessageList } from "@/components/workspace/messages";
@@ -49,7 +49,6 @@ import {
   type HumanInputRequest,
   type HumanInputResponse,
 } from "@/core/messages/human-input";
-import { extractContentFromMessage } from "@/core/messages/utils";
 import { safeLocalStorage } from "@/core/settings/local";
 import { hasToolResult, useThreadStream } from "@/core/threads/hooks";
 import { uuid } from "@/core/utils/uuid";
@@ -82,25 +81,6 @@ async function getAgentWithRetry(agentName: string) {
   }
 
   return null;
-}
-
-function extractSoulMarkdown(text: string): string {
-  const fenced = /```(?:markdown|md)?\s*([\s\S]*?)```/i.exec(text);
-  if (fenced?.[1]) {
-    return fenced[1].trim();
-  }
-  return text.trim();
-}
-
-function extractLatestAssistantSoul(messages: Message[]): string {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (!message || message.type !== "ai") continue;
-    const text = extractContentFromMessage(message);
-    if (!text.trim()) continue;
-    return extractSoulMarkdown(text);
-  }
-  return "";
 }
 
 export default function NewAgentPage() {

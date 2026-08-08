@@ -3,6 +3,7 @@
 import {
   FileUpIcon,
   FlaskConicalIcon,
+  PencilIcon,
   RotateCcwIcon,
   SearchIcon,
   TablePropertiesIcon,
@@ -19,6 +20,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { toast } from "sonner";
 
 import {
   ScenarioSelect,
@@ -28,12 +30,16 @@ import {
 import {
   AlertError,
   ConfirmDialog,
+  DialogFormSection,
+  DialogInputField,
+  FormDialog,
   InlineEmpty,
   ItemListInfiniteTail,
   ItemListPanel,
   ItemRowStatusBadge,
   Shell,
   ShellHeader,
+  dialogSaveFooterProps,
   itemRowStatusToneFromValue,
   useItemListInfiniteScroll,
 } from "@/components/component";
@@ -88,15 +94,6 @@ import {
 import { cn } from "@/lib/utils";
 
 type KnowledgeT = Translations["knowledge"];
-
-function NoticeBanner({ children }: { children: React.ReactNode }) {
-  if (!children) return null;
-  return (
-    <p className="bg-muted/50 text-muted-foreground rounded-lg border px-3 py-2 text-sm">
-      {children}
-    </p>
-  );
-}
 
 const DOC_PAGE_SIZE = 20;
 const INGEST_POLL_MS = 3000;
@@ -180,7 +177,6 @@ export default function KnowledgeSpaceDocumentsPage() {
   const [docs, setDocs] = useState<KnowledgeDocument[]>([]);
   const [docsTotal, setDocsTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [reindexingId, setReindexingId] = useState<string | null>(null);
@@ -213,6 +209,9 @@ export default function KnowledgeSpaceDocumentsPage() {
   const [docToDelete, setDocToDelete] = useState<KnowledgeDocument | null>(
     null,
   );
+  const [docToEdit, setDocToEdit] = useState<KnowledgeDocument | null>(null);
+  const [editDocTitle, setEditDocTitle] = useState("");
+  const [editDocBusy, setEditDocBusy] = useState(false);
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
   const [deleteAllBusy, setDeleteAllBusy] = useState(false);
   const uploadAbortRef = useRef<AbortController | null>(null);
@@ -365,7 +364,7 @@ export default function KnowledgeSpaceDocumentsPage() {
       if (embedded.doc_id) {
         await saveDocIngestMode(embedded.doc_id, ingestMode);
       }
-      setNotice(embedded.message ?? t.knowledge.dedupedNotice);
+      toast.success(embedded.message ?? t.knowledge.dedupedNotice);
       setError(null);
       await refreshDocuments();
       return embedded.doc_id;
@@ -426,7 +425,6 @@ export default function KnowledgeSpaceDocumentsPage() {
     uploadAbortRef.current = controller;
     const { signal } = controller;
     setBusy(true);
-    setNotice(null);
     try {
       storeIngestMode(spaceId, mode);
       setIngestMode(mode);
@@ -448,7 +446,7 @@ export default function KnowledgeSpaceDocumentsPage() {
       );
       if (signal.aborted) return;
       if (docId && mode === "structured") {
-        setNotice(t.knowledge.structuredImported(segmentCount ?? 0));
+        toast.success(t.knowledge.structuredImported(segmentCount ?? 0));
       }
       setUploadOpen(false);
     } catch (e) {
@@ -470,7 +468,7 @@ export default function KnowledgeSpaceDocumentsPage() {
       await reindexDocument(spaceId, doc.id, prepared.file);
       await waitForDocumentIngest(doc.id);
       if (ingestMode === "structured") {
-        setNotice(t.knowledge.structuredReindexed);
+        toast.success(t.knowledge.structuredReindexed);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -484,6 +482,36 @@ export default function KnowledgeSpaceDocumentsPage() {
   function requestReindex(doc: KnowledgeDocument) {
     setReindexTargetId(doc.id);
     reindexFileRef.current?.click();
+  }
+
+  function openEditDocument(doc: KnowledgeDocument) {
+    setDocToEdit(doc);
+    setEditDocTitle(doc.title);
+  }
+
+  async function onSaveDocumentTitle() {
+    if (!docToEdit) return;
+    const trimmed = editDocTitle.trim();
+    if (!trimmed) return;
+    setEditDocBusy(true);
+    try {
+      const updated = await updateDocument(spaceId, docToEdit.id, {
+        title: trimmed,
+      });
+      setDocs((prev) =>
+        prev.map((row) => (row.id === updated.id ? updated : row)),
+      );
+      setChunkDoc((current) =>
+        current?.id === updated.id ? updated : current,
+      );
+      setDocToEdit(null);
+      toast.success(t.knowledge.documentUpdated);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setEditDocBusy(false);
+    }
   }
 
   async function onDelete(doc: KnowledgeDocument) {
@@ -505,7 +533,7 @@ export default function KnowledgeSpaceDocumentsPage() {
     try {
       await deleteAllDocuments(spaceId);
       setDeleteAllOpen(false);
-      setNotice(t.knowledge.deleteAllSuccess);
+      toast.success(t.knowledge.deleteAllSuccess);
       await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -641,7 +669,6 @@ export default function KnowledgeSpaceDocumentsPage() {
         }
       >
         {error ? <AlertError>{error}</AlertError> : null}
-        <NoticeBanner>{notice}</NoticeBanner>
 
         <ItemListPanel
           title={t.knowledge.docsList}
@@ -778,6 +805,18 @@ export default function KnowledgeSpaceDocumentsPage() {
                             </Button>
                           </Tooltip>
                         ) : null}
+                        <Tooltip content={t.knowledge.editDocument}>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 px-2"
+                            disabled={editDocBusy && docToEdit?.id === d.id}
+                            onClick={() => openEditDocument(d)}
+                          >
+                            <PencilIcon className="size-3.5" />
+                            {t.common.edit}
+                          </Button>
+                        </Tooltip>
                         <Tooltip
                           content={
                             d.status === "processing"
@@ -828,6 +867,29 @@ export default function KnowledgeSpaceDocumentsPage() {
         onConfirm={() => void onDeleteAll()}
         onCancel={() => setDeleteAllOpen(false)}
       />
+
+      <FormDialog
+        open={docToEdit != null}
+        onOpenChange={(open) => {
+          if (!open && !editDocBusy) setDocToEdit(null);
+        }}
+        title={t.knowledge.editDocument}
+        {...dialogSaveFooterProps(t.common, {
+          busy: editDocBusy,
+          disabled: !editDocTitle.trim(),
+        })}
+        onConfirm={() => void onSaveDocumentTitle()}
+      >
+        <DialogFormSection title={t.knowledge.sectionDocument}>
+          <DialogInputField
+            label={t.knowledge.fieldTitle}
+            value={editDocTitle}
+            onChange={setEditDocTitle}
+            disabled={editDocBusy}
+            autoFocus={docToEdit != null}
+          />
+        </DialogFormSection>
+      </FormDialog>
 
       <ConfirmDialog
         open={docToDelete != null}

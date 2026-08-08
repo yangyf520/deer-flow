@@ -2,6 +2,7 @@
 
 /** Agent workspace UI — cards + create/edit dialog. Composed in `app/workspace/agents/page.tsx`. */
 
+import type { Message } from "@langchain/langgraph-sdk";
 import {
   BookOpenIcon,
   BotIcon,
@@ -12,16 +13,22 @@ import {
   SparklesIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
 
+import {
+  PromptInput,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+} from "@/components/ai-elements/prompt-input";
 import {
   CardAction,
   ConfirmDialog,
@@ -29,6 +36,7 @@ import {
   DialogFormSection,
   DialogInputField,
   DialogSelectField,
+  DialogShell,
   DialogTextareaField,
   FormDialog,
   InlineEmpty,
@@ -40,6 +48,10 @@ import {
 } from "@/components/component";
 import { dialogSecondaryButtonClass } from "@/components/component/styles";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { ArtifactsProvider } from "@/components/workspace/artifacts";
+import { MessageList } from "@/components/workspace/messages";
+import { ThreadContext } from "@/components/workspace/messages/context";
 import type {
   Agent,
   CreateAgentRequest,
@@ -64,7 +76,15 @@ import {
   spaceSecondaryDescription,
   type Space,
 } from "@/core/knowledge";
+import {
+  buildHumanInputResponseText,
+  type HumanInputRequest,
+  type HumanInputResponse,
+} from "@/core/messages/human-input";
+import { extractContentFromMessage } from "@/core/messages/utils";
 import { loadModels } from "@/core/models/api";
+import { useThreadStream } from "@/core/threads/hooks";
+import { uuid } from "@/core/utils/uuid";
 import { cn } from "@/lib/utils";
 
 const NAME_RE = /^[A-Za-z0-9-]+$/;
@@ -73,14 +93,80 @@ const INHERIT_VALUE = "__inherit__";
 export const AGENT_SOUL_DRAFT_FORM_KEY = "deerflow:pending-agent-form";
 export const AGENT_SOUL_DRAFT_SOUL_KEY = "deerflow:pending-agent-soul";
 
-type PendingAgentForm = {
-  mode: "create" | "edit";
-  name: string;
-  description: string;
-  model: string | null;
-  spaces: string[];
-  soul: string;
-};
+function extractSoulMarkdown(text: string): string {
+  const fenced = /```(?:markdown|md)?\s*([\s\S]*?)```/i.exec(text);
+  if (fenced?.[1]) {
+    return fenced[1].trim();
+  }
+  return text.trim();
+}
+
+export function extractLatestAssistantSoul(messages: Message[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (!message || message.type !== "ai") continue;
+    const text = extractContentFromMessage(message);
+    if (!text.trim()) continue;
+    return extractSoulMarkdown(text);
+  }
+  return "";
+}
+
+function extractFencedSoulFromMessages(messages: Message[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (!message || message.type !== "ai") continue;
+    const text = extractContentFromMessage(message);
+    const fenced = /```(?:markdown|md)?\s*([\s\S]*?)```/i.exec(text);
+    if (fenced?.[1]?.trim()) {
+      return fenced[1].trim();
+    }
+  }
+  return "";
+}
+
+function latestAiMessage(messages: Message[]): Message | undefined {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.type === "ai") return message;
+  }
+  return undefined;
+}
+
+function latestAiStillAsking(message: Message): boolean {
+  if (message.type !== "ai") return false;
+  if (
+    message.tool_calls?.some(
+      (toolCall) => toolCall.name === "ask_clarification",
+    )
+  ) {
+    return true;
+  }
+  const text = extractContentFromMessage(message).trim();
+  if (!text) return false;
+  const lastLine = text.split("\n").pop()?.trim() ?? "";
+  return /[?？]\s*$/.test(lastLine);
+}
+
+function shouldAutoRequestSoulFinish(
+  messages: Message[],
+  userReplyCount: number,
+): boolean {
+  if (userReplyCount < 1) return false;
+  const latestAi = latestAiMessage(messages);
+  if (!latestAi) return false;
+  if (extractFencedSoulFromMessages(messages)) return false;
+  return !latestAiStillAsking(latestAi);
+}
+
+function resolveSoulDraftForReturn(
+  preview: string,
+  messages: Message[],
+): string {
+  const trimmedPreview = preview.trim();
+  if (trimmedPreview) return trimmedPreview;
+  return extractFencedSoulFromMessages(messages);
+}
 
 function newChatHref(agentName: string) {
   return `/workspace/agents/${encodeURIComponent(agentName)}/chats/new`;
@@ -106,6 +192,339 @@ export function useAccessibleSpaces() {
   }, [reload]);
 
   return { spaces, loading };
+}
+
+type SoulDraftFinishStatus = "idle" | "requested" | "ready";
+
+function AgentSoulDraftChat({
+  agentName,
+  description,
+  onConfirm,
+  onSnapshotChange,
+}: {
+  agentName: string;
+  description: string;
+  onConfirm: (soul: string) => void;
+  onSnapshotChange: (snapshot: {
+    preview: string;
+    messages: Message[];
+  }) => void;
+}) {
+  const { t } = useI18n();
+  const threadId = useMemo(() => uuid(), []);
+  const draftStartedRef = useRef(false);
+  const soulDraftFinishStatusRef = useRef<SoulDraftFinishStatus>("idle");
+  const autoFinishRequestedRef = useRef(false);
+  const userReplyCountRef = useRef(0);
+  const requestSoulFinishRef = useRef<(() => Promise<void>) | null>(null);
+
+  const [soulDraftFinishStatus, setSoulDraftFinishStatus] =
+    useState<SoulDraftFinishStatus>("idle");
+  const [soulDraftPreview, setSoulDraftPreview] = useState("");
+
+  useEffect(() => {
+    soulDraftFinishStatusRef.current = soulDraftFinishStatus;
+  }, [soulDraftFinishStatus]);
+
+  const { thread, sendMessage } = useThreadStream({
+    threadId: undefined,
+    context: {
+      mode: "flash",
+    },
+    onFinish(state) {
+      const fencedSoul = extractFencedSoulFromMessages(state.messages);
+      if (fencedSoul) {
+        setSoulDraftPreview(fencedSoul);
+        setSoulDraftFinishStatus("ready");
+        return;
+      }
+
+      if (soulDraftFinishStatusRef.current === "requested") {
+        const soul = extractLatestAssistantSoul(state.messages);
+        if (!soul) {
+          setSoulDraftFinishStatus("idle");
+          autoFinishRequestedRef.current = false;
+          toast.error(t.agents.soulDraftExtractError);
+          return;
+        }
+        setSoulDraftPreview(soul);
+        setSoulDraftFinishStatus("ready");
+        return;
+      }
+
+      if (
+        soulDraftFinishStatusRef.current === "idle" &&
+        !autoFinishRequestedRef.current &&
+        shouldAutoRequestSoulFinish(state.messages, userReplyCountRef.current)
+      ) {
+        autoFinishRequestedRef.current = true;
+        void requestSoulFinishRef.current?.();
+      }
+    },
+  });
+
+  const requestSoulFinish = useCallback(async () => {
+    if (
+      !agentName ||
+      thread.isLoading ||
+      soulDraftPreview ||
+      soulDraftFinishStatusRef.current === "requested"
+    ) {
+      return;
+    }
+
+    setSoulDraftFinishStatus("requested");
+    try {
+      await sendMessage(
+        threadId,
+        { text: t.agents.soulDraftFinishMessage, files: [] },
+        undefined,
+        { additionalKwargs: { hide_from_ui: true } },
+      );
+    } catch (error) {
+      setSoulDraftFinishStatus("idle");
+      autoFinishRequestedRef.current = false;
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  }, [
+    agentName,
+    sendMessage,
+    soulDraftPreview,
+    t.agents.soulDraftFinishMessage,
+    thread.isLoading,
+    threadId,
+  ]);
+
+  useEffect(() => {
+    requestSoulFinishRef.current = requestSoulFinish;
+  }, [requestSoulFinish]);
+
+  const startDraftChat = useCallback(async () => {
+    if (!agentName || draftStartedRef.current) return;
+    draftStartedRef.current = true;
+
+    const descriptionPart = description
+      ? t.agents.soulDraftDescriptionPart.replace("{description}", description)
+      : "";
+    const text = t.agents.soulDraftBootstrapMessage
+      .replace("{name}", agentName)
+      .replace("{descriptionPart}", descriptionPart);
+
+    await sendMessage(threadId, { text, files: [] });
+  }, [
+    agentName,
+    description,
+    sendMessage,
+    t.agents.soulDraftBootstrapMessage,
+    t.agents.soulDraftDescriptionPart,
+    threadId,
+  ]);
+
+  useEffect(() => {
+    void startDraftChat();
+  }, [startDraftChat]);
+
+  const handleChatSubmit = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || thread.isLoading) return;
+      userReplyCountRef.current += 1;
+      await sendMessage(threadId, { text: trimmed, files: [] });
+    },
+    [sendMessage, thread.isLoading, threadId],
+  );
+
+  const handleSubmitHumanInput = useCallback(
+    async (request: HumanInputRequest, response: HumanInputResponse) => {
+      let sent = false;
+      await sendMessage(
+        threadId,
+        {
+          text: buildHumanInputResponseText(request, response),
+          files: [],
+        },
+        undefined,
+        {
+          additionalKwargs: {
+            hide_from_ui: true,
+            human_input_response: response,
+          },
+          onSent: () => {
+            sent = true;
+          },
+        },
+      );
+      if (sent) {
+        userReplyCountRef.current += 1;
+      }
+      return sent;
+    },
+    [sendMessage, threadId],
+  );
+
+  useEffect(() => {
+    onSnapshotChange({
+      preview: soulDraftPreview,
+      messages: thread.messages,
+    });
+  }, [onSnapshotChange, soulDraftPreview, thread.messages]);
+
+  const handleConfirmSoulDraft = useCallback(() => {
+    const trimmed = soulDraftPreview.trim();
+    if (!trimmed) return;
+    onConfirm(trimmed);
+  }, [onConfirm, soulDraftPreview]);
+
+  return (
+    <ThreadContext.Provider value={{ thread }}>
+      <ArtifactsProvider>
+        <div className="flex min-h-[min(62vh,32rem)] flex-col">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border">
+            {soulDraftPreview ? (
+              <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-3">
+                <div className="flex shrink-0 items-center justify-between gap-3">
+                  <p className="text-sm font-medium">
+                    {t.agents.soulDraftConfirmTitle}
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleConfirmSoulDraft}
+                  >
+                    {t.agents.soulDraftReturn}
+                  </Button>
+                </div>
+                <Textarea
+                  value={soulDraftPreview}
+                  onChange={(event) => setSoulDraftPreview(event.target.value)}
+                  className="field-sizing-fixed min-h-0 flex-1 resize-none overflow-y-auto font-mono text-xs leading-relaxed"
+                />
+              </div>
+            ) : (
+              <>
+                <MessageList
+                  className="min-h-0 flex-1 pt-2"
+                  threadId={threadId}
+                  thread={thread}
+                  onSubmitHumanInput={handleSubmitHumanInput}
+                  enableSidecarActions={false}
+                />
+
+                <div className="bg-background shrink-0 border-t px-3 py-2">
+                  {soulDraftFinishStatus === "requested" ? (
+                    <p className="text-muted-foreground py-1 text-center text-sm">
+                      {t.agents.soulGenerating}
+                    </p>
+                  ) : (
+                    <PromptInput
+                      disabled={thread.isLoading}
+                      onSubmit={({ text }) => void handleChatSubmit(text)}
+                    >
+                      <PromptInputTextarea
+                        autoFocus
+                        placeholder={t.agents.soulDraftChatPlaceholder}
+                        disabled={thread.isLoading}
+                      />
+                      <PromptInputFooter className="justify-end">
+                        <PromptInputSubmit disabled={thread.isLoading} />
+                      </PromptInputFooter>
+                    </PromptInput>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </ArtifactsProvider>
+    </ThreadContext.Provider>
+  );
+}
+
+function AgentSoulDraftDialog({
+  open,
+  onOpenChange,
+  agentName,
+  description,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  agentName: string;
+  description: string;
+  onConfirm: (soul: string) => void;
+}) {
+  const { t } = useI18n();
+  const [sessionKey, setSessionKey] = useState(0);
+  const snapshotRef = useRef<{ preview: string; messages: Message[] }>({
+    preview: "",
+    messages: [],
+  });
+  const appliedOnCloseRef = useRef(false);
+
+  useEffect(() => {
+    if (open) {
+      setSessionKey((key) => key + 1);
+      snapshotRef.current = { preview: "", messages: [] };
+      appliedOnCloseRef.current = false;
+    }
+  }, [open]);
+
+  const handleSnapshotChange = useCallback(
+    (snapshot: { preview: string; messages: Message[] }) => {
+      snapshotRef.current = snapshot;
+    },
+    [],
+  );
+
+  const handleConfirm = useCallback(
+    (soul: string) => {
+      appliedOnCloseRef.current = true;
+      onConfirm(soul);
+      onOpenChange(false);
+    },
+    [onConfirm, onOpenChange],
+  );
+
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      if (!next) {
+        if (!appliedOnCloseRef.current) {
+          const soul = resolveSoulDraftForReturn(
+            snapshotRef.current.preview,
+            snapshotRef.current.messages,
+          );
+          if (soul) {
+            onConfirm(soul);
+          }
+        }
+        appliedOnCloseRef.current = false;
+      }
+      onOpenChange(next);
+    },
+    [onConfirm, onOpenChange],
+  );
+
+  return (
+    <DialogShell
+      open={open}
+      onOpenChange={handleOpenChange}
+      title={t.agents.soulDraftPageTitle}
+      bodyClassName={cn(
+        "flex min-h-0 flex-1 flex-col gap-0 overflow-hidden pt-0",
+      )}
+      contentClassName="flex max-h-[min(92vh,52rem)] flex-col gap-2 p-4 sm:max-w-[52rem] sm:p-5"
+    >
+      {open ? (
+        <AgentSoulDraftChat
+          key={sessionKey}
+          agentName={agentName}
+          description={description}
+          onConfirm={handleConfirm}
+          onSnapshotChange={handleSnapshotChange}
+        />
+      ) : null}
+    </DialogShell>
+  );
 }
 
 function SpaceMountRow({
@@ -181,7 +600,6 @@ export function AgentFormDialog({
   agent?: Agent | null;
 }) {
   const { t, locale } = useI18n();
-  const router = useRouter();
   const { user } = useAuth();
   const createAgent = useCreateAgent();
   const updateAgent = useUpdateAgent();
@@ -194,6 +612,7 @@ export function AgentFormDialog({
     createAgent.isPending || updateAgent.isPending || deleteAgent.isPending;
 
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [soulDraftOpen, setSoulDraftOpen] = useState(false);
   const [agentName, setAgentName] = useState("");
   const [nameError, setNameError] = useState("");
   const [description, setDescription] = useState("");
@@ -207,54 +626,13 @@ export function AgentFormDialog({
   useEffect(() => {
     if (!open) return;
 
-    const pendingSoul =
-      typeof window !== "undefined"
-        ? window.sessionStorage.getItem(AGENT_SOUL_DRAFT_SOUL_KEY)
-        : null;
-    const pendingFormRaw =
-      typeof window !== "undefined"
-        ? window.sessionStorage.getItem(AGENT_SOUL_DRAFT_FORM_KEY)
-        : null;
-
-    let pendingForm: PendingAgentForm | null = null;
-    if (pendingFormRaw) {
-      try {
-        pendingForm = JSON.parse(pendingFormRaw) as PendingAgentForm;
-      } catch {
-        pendingForm = null;
-      }
-      window.sessionStorage.removeItem(AGENT_SOUL_DRAFT_FORM_KEY);
-    }
-    if (pendingSoul) {
-      window.sessionStorage.removeItem(AGENT_SOUL_DRAFT_SOUL_KEY);
-    }
-
-    const pendingMatchesMode =
-      pendingForm?.mode === (isCreate ? "create" : "edit");
-
-    if (pendingForm && pendingMatchesMode) {
-      setAgentName(pendingForm.name);
-      setNameError("");
-      setDescription(pendingForm.description);
-      setModel(pendingForm.model);
-      setSpaces(pendingForm.spaces);
-      setSoul(pendingSoul ?? pendingForm.soul);
-      if (pendingSoul) {
-        toast.success(t.agents.soulGenerated);
-      }
-      return;
-    }
-
     if (isCreate) {
       setAgentName("");
       setNameError("");
       setDescription("");
       setModel(null);
-      setSoul(pendingSoul ?? "");
+      setSoul("");
       setSpaces([]);
-      if (pendingSoul) {
-        toast.success(t.agents.soulGenerated);
-      }
       return;
     }
     if (!agent) return;
@@ -262,14 +640,11 @@ export function AgentFormDialog({
     setNameError("");
     setDescription(agent.description ?? "");
     setModel(agent.model ?? null);
-    setSoul(pendingSoul ?? agent.soul ?? "");
+    setSoul(agent.soul ?? "");
     setSpaces(
       Array.isArray(agent.knowledge_spaces) ? [...agent.knowledge_spaces] : [],
     );
-    if (pendingSoul) {
-      toast.success(t.agents.soulGenerated);
-    }
-  }, [open, isCreate, agent, t.agents.soulGenerated]);
+  }, [open, isCreate, agent]);
 
   useEffect(() => {
     if (!open) return;
@@ -313,30 +688,12 @@ export function AgentFormDialog({
       return;
     }
 
-    const snapshot: PendingAgentForm = {
-      mode: isCreate ? "create" : "edit",
-      name: trimmedName,
-      description: description.trim(),
-      model,
-      spaces,
-      soul: soul.trim(),
-    };
-    window.sessionStorage.setItem(
-      AGENT_SOUL_DRAFT_FORM_KEY,
-      JSON.stringify(snapshot),
-    );
+    setSoulDraftOpen(true);
+  }
 
-    const params = new URLSearchParams({
-      draft: "1",
-      name: trimmedName,
-    });
-    const trimmedDescription = description.trim();
-    if (trimmedDescription) {
-      params.set("description", trimmedDescription);
-    }
-
-    onOpenChange(false);
-    router.push(`/workspace/agents/new?${params.toString()}`);
+  function handleSoulDraftConfirm(generatedSoul: string) {
+    setSoul(generatedSoul);
+    toast.success(t.agents.soulGenerated);
   }
 
   async function handleSave() {
@@ -578,6 +935,14 @@ export function AgentFormDialog({
           onCancel={() => setDeleteOpen(false)}
         />
       ) : null}
+
+      <AgentSoulDraftDialog
+        open={soulDraftOpen}
+        onOpenChange={setSoulDraftOpen}
+        agentName={agentName.trim()}
+        description={description.trim()}
+        onConfirm={handleSoulDraftConfirm}
+      />
     </>
   );
 }
