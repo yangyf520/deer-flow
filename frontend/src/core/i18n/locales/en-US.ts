@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import { apiKeysEnUS } from "./api-keys";
+import { codeTableEnUS } from "./code-table";
 import { knowledgeEnUS } from "./knowledge";
 import type { Translations } from "./types";
 
@@ -286,8 +287,11 @@ export const enUS: Translations = {
     scheduledTasks: "Scheduled tasks",
     agentsDisabledTooltip: "Feature not enabled",
     knowledge: "Knowledge",
+    codeTable: "Code tables",
     apiKeys: "API keys",
   },
+
+  codeTable: codeTableEnUS,
 
   // Scheduled tasks
   scheduledTasks: {

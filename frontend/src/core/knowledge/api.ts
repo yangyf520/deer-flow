@@ -81,6 +81,15 @@ export type KnowledgeTag = {
   scenario?: string;
 };
 
+export type KnowledgeIndustryTag = {
+  id: string;
+  label?: string;
+  space_id?: string;
+  department?: string[];
+  keywords?: string[];
+  aliases?: string[];
+};
+
 export type KnowledgeTagGroup = {
   id: string;
   label?: string;
@@ -93,6 +102,7 @@ export type KnowledgeCodeTable = {
   tags: KnowledgeTag[];
   tag_groups: KnowledgeTagGroup[];
   scenarios: ScenarioPack[];
+  industry_tags?: KnowledgeIndustryTag[];
 };
 
 export type ScenarioDefinitionInput = {
@@ -218,12 +228,7 @@ export async function listScenarios(): Promise<ScenariosListResponse> {
   return readJson(res, "Failed to list scenarios");
 }
 
-export async function listCodeTable(): Promise<KnowledgeCodeTable> {
-  const res = await fetch(`${base()}/catalog`, withLocale());
-  return readJson(res, "Failed to load knowledge code table");
-}
-
-export async function migrateCodeTableHost(
+export async function migrateKnowledgeScenarioHost(
   hostSpaceId: string,
   options?: { onlyUnassigned?: boolean },
 ): Promise<{
@@ -231,7 +236,7 @@ export async function migrateCodeTableHost(
   updated: number;
 }> {
   const res = await fetch(
-    `${base()}/catalog/migrate-host`,
+    `${base()}/scenarios/migrate-host`,
     withLocale({
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -241,7 +246,7 @@ export async function migrateCodeTableHost(
       }),
     }),
   );
-  return readJson(res, "Failed to migrate code table host space");
+  return readJson(res, "Failed to migrate scenario host space");
 }
 
 export async function upsertScenario(
@@ -265,6 +270,41 @@ export async function deleteScenario(code: string): Promise<void> {
   });
   if (!res.ok) {
     await readJson(res, "Failed to delete scenario");
+  }
+}
+
+export type IndustryTagDefinitionInput = {
+  code: string;
+  label: string;
+  space_id?: string;
+  department?: string[];
+  keywords?: string[];
+  aliases?: string[];
+  sort_order?: number;
+};
+
+export async function upsertIndustryTag(
+  code: string,
+  input: IndustryTagDefinitionInput,
+): Promise<KnowledgeIndustryTag> {
+  const res = await fetch(
+    `${base()}/industry-tags/${encodeURIComponent(code)}`,
+    withLocale({
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
+  return readJson(res, "Failed to save industry tag");
+}
+
+export async function deleteIndustryTag(code: string): Promise<void> {
+  const res = await fetch(
+    `${base()}/industry-tags/${encodeURIComponent(code)}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) {
+    await readJson(res, "Failed to delete industry tag");
   }
 }
 
@@ -481,6 +521,8 @@ export async function searchKnowledge(input: {
   scenario?: string;
   top_k?: number;
   similarity_cutoff?: number;
+  kinds?: string[];
+  tags?: string[];
 }): Promise<EvidencePackResponse> {
   const res = await fetch(`${base()}/search`, {
     method: "POST",

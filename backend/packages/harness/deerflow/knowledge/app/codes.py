@@ -26,6 +26,8 @@ TYPE_SCENARIO = "scenario"
 TYPE_KIND = "kind"
 TYPE_TAG = "tag"
 TYPE_TAG_GROUP = "tag_group"
+TYPE_INDUSTRY_TAG = "industry_tag"
+DEFAULT_SCENARIO_TAG = "general"
 LOCALE_ZH = "zh-CN"
 LOCALE_EN = "en-US"
 
@@ -56,6 +58,7 @@ class _CatalogCache:
     tags_by_scenario: dict[str, dict[str, str]] = field(default_factory=dict)
     # (scenario_code, group_code) -> {label, tags}
     tag_groups: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
+    industry_tags: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _utcnow() -> datetime:
@@ -124,8 +127,22 @@ def _build_cache(rows: list[PubCodeRow]) -> _CatalogCache:
                 "label": row.label or row.code,
                 "tags": tags,
             }
+        elif row.type_key == TYPE_INDUSTRY_TAG and not row.parent_code:
+            attrs = row.attrs if isinstance(row.attrs, dict) else {}
+            cache.industry_tags.append(
+                {
+                    "code": row.code,
+                    "label": row.label or row.code,
+                    "space_id": str(attrs.get("space_id") or ""),
+                    "department": [str(v) for v in (attrs.get("department") or []) if v],
+                    "keywords": [str(v) for v in (attrs.get("keywords") or []) if v],
+                    "aliases": [str(v) for v in (attrs.get("aliases") or []) if v],
+                    "sort_order": int(row.sort_order or 0),
+                }
+            )
     for scenario, kinds in cache.kinds_by_scenario.items():
         cache.kinds_by_scenario[scenario] = sorted(set(kinds))
+    cache.industry_tags.sort(key=lambda item: (item["sort_order"], item["code"]))
     return cache
 
 
@@ -440,9 +457,81 @@ async def seed_catalog(session: AsyncSession) -> bool:
     return bool(rows)
 
 
+async def backfill_default_tags(session: AsyncSession) -> int:
+    """Ensure every scenario has at least the default ``general`` tag."""
+    scenarios = list(
+        (
+            await session.execute(
+                select(PubCodeRow).where(
+                    PubCodeRow.domain == KNOWLEDGE_DOMAIN,
+                    PubCodeRow.type_key == TYPE_SCENARIO,
+                    PubCodeRow.parent_code == "",
+                    PubCodeRow.enabled.is_(True),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not scenarios:
+        return 0
+
+    scenario_codes = [row.code for row in scenarios if row.code]
+    existing = list(
+        (
+            await session.execute(
+                select(PubCodeRow.parent_code, PubCodeRow.code).where(
+                    PubCodeRow.domain == KNOWLEDGE_DOMAIN,
+                    PubCodeRow.type_key == TYPE_TAG,
+                    PubCodeRow.parent_code.in_(scenario_codes),
+                    PubCodeRow.enabled.is_(True),
+                )
+            )
+        ).all()
+    )
+    tagged_parents = {parent for parent, _code in existing if parent}
+    now = _utcnow()
+    added = 0
+    for scenario in scenarios:
+        if scenario.code in tagged_parents:
+            continue
+        session.add(
+            PubCodeRow(
+                id=str(uuid.uuid4()),
+                domain=KNOWLEDGE_DOMAIN,
+                type_key=TYPE_TAG,
+                code=DEFAULT_SCENARIO_TAG,
+                label=_default_label_for_code(DEFAULT_SCENARIO_TAG),
+                parent_code=scenario.code,
+                attrs={},
+                sort_order=0,
+                enabled=True,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        added += 1
+    if added:
+        await session.commit()
+    return added
+
+
 async def ensure_catalog(session: AsyncSession) -> _CatalogCache:
     await seed_catalog(session)
+    await backfill_default_tags(session)
     return await refresh_cache(session)
+
+
+def industry_tag_api_payload(row: PubCodeRow) -> dict[str, Any]:
+    attrs = row.attrs if isinstance(row.attrs, dict) else {}
+    return {
+        "id": row.code,
+        "label": row.label or row.code,
+        "space_id": str(attrs.get("space_id") or ""),
+        "department": [str(v) for v in (attrs.get("department") or []) if v],
+        "keywords": [str(v) for v in (attrs.get("keywords") or []) if v],
+        "aliases": [str(v) for v in (attrs.get("aliases") or []) if v],
+    }
 
 
 async def validate_scenario_code(session: AsyncSession, code: str) -> str:
@@ -503,11 +592,24 @@ def build_catalog(cache: _CatalogCache, *, locale: str = LOCALE_ZH) -> dict[str,
         for tag_code, label in sorted(cache.tags_by_scenario.get(code, {}).items()):
             tags_out.append({"id": tag_code, "label": label, "scenario": code})
 
+    industry_tags_out = [
+        {
+            "id": item["code"],
+            "label": item["label"],
+            "space_id": item["space_id"],
+            "department": list(item["department"]),
+            "keywords": list(item["keywords"]),
+            "aliases": list(item["aliases"]),
+        }
+        for item in cache.industry_tags
+    ]
+
     return {
         "kinds": kinds_out,
         "tags": tags_out,
         "tag_groups": tag_groups_out,
         "scenarios": scenarios_out,
+        "industry_tags": industry_tags_out,
     }
 
 

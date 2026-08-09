@@ -139,6 +139,27 @@ class KnowledgeTagResponse(BaseModel):
     scenario: str = ""
 
 
+class KnowledgeIndustryTagResponse(BaseModel):
+    id: str
+    label: str = ""
+    space_id: str = ""
+    department: list[str] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
+    aliases: list[str] = Field(default_factory=list)
+
+
+class IndustryTagDefinitionRequest(BaseModel):
+    """Create/update a knowledge industry tag in pub_codes."""
+
+    code: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    space_id: str | None = None
+    department: list[str] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
+    aliases: list[str] = Field(default_factory=list)
+    sort_order: int | None = None
+
+
 class KnowledgeTagGroupResponse(BaseModel):
     id: str
     label: str = ""
@@ -147,12 +168,13 @@ class KnowledgeTagGroupResponse(BaseModel):
 
 
 class KnowledgeCatalogResponse(BaseModel):
-    """Knowledge code catalog from DB (pub_codes); labels stored server-side."""
+    """Knowledge tag/kind bundle from pub_codes (code-table API)."""
 
     kinds: list[KnowledgeKindResponse] = Field(default_factory=list)
     tags: list[KnowledgeTagResponse] = Field(default_factory=list)
     tag_groups: list[KnowledgeTagGroupResponse] = Field(default_factory=list)
     scenarios: list[ScenarioPackResponse] = Field(default_factory=list)
+    industry_tags: list[KnowledgeIndustryTagResponse] = Field(default_factory=list)
 
 
 class DocumentResponse(BaseModel):
@@ -277,6 +299,8 @@ class KnowledgeSearchRequest(BaseModel):
     top_k: int | None = None
     similarity_cutoff: float | None = Field(default=None, ge=0, le=1)
     knowledge_version: str = "current"
+    kinds: list[str] | None = None
+    tags: list[str] | None = None
 
 
 class RecallEvalCase(BaseModel):

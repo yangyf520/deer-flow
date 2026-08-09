@@ -21,6 +21,14 @@ export type KnowledgeTranslations = {
   codeTableSearchEmpty: string;
   codeTableEmpty: string;
   codeTablePickSpace: string;
+  codeTableIndustryTags: string;
+  codeTableIndustryTagsEmpty: string;
+  codeTableTags: string;
+  codeTableTagsEmpty: string;
+  codeTableKindsEmpty: string;
+  codeTableTagGroupsEmpty: string;
+  codeTableScenarios: string;
+  codeTableScenariosEmpty: string;
   codeTableKinds: string;
   codeTableTagGroups: string;
   codeTableEntryCode: string;
@@ -35,7 +43,9 @@ export type KnowledgeTranslations = {
   codeTableMigrated: (count: number) => string;
   codeTableOpenSpace: string;
   createScenario: string;
+  createIndustryTag: string;
   editScenario: string;
+  editIndustryTag: string;
   codeTableEntryLabel: string;
   codeTableEntryLabelPlaceholder: string;
   codeTableEntryCodePlaceholder: string;
@@ -46,6 +56,16 @@ export type KnowledgeTranslations = {
   scenarioCreated: string;
   scenarioUpdated: string;
   scenarioDeleted: string;
+  industryTagCreated: string;
+  industryTagUpdated: string;
+  industryTagDeleted: string;
+  fieldKeywords: string;
+  fieldDepartment: string;
+  fieldAliases: string;
+  industryTagCodePlaceholder: string;
+  industryTagKeywordsPlaceholder: string;
+  industryTagDepartmentPlaceholder: string;
+  industryTagAliasesPlaceholder: string;
   fieldTopK: string;
   fieldScore: string;
   editSpace: string;
@@ -208,18 +228,29 @@ export const knowledgeEnUS: KnowledgeTranslations = {
   emptySpaces: "No knowledge spaces yet",
   spaceCount: "{count} spaces",
   createSpace: "New space",
-  codeTableButton: "Code table",
-  codeTableTitle: "Code table",
+  codeTableButton: "Tag management",
+  codeTableTitle: "Tag management",
   codeTableDescription:
-    "Manage code-table entries for the selected knowledge space. Each space maintains its own code table.",
-  codeTableListTitle: "Code table",
+    "Manage document kinds, tags, and tag groups; tag documents on import and filter retrieval by tag",
+  codeTableListTitle: "Tag management",
   codeTableCountTotal: (count) => `Code table count ${count}`,
   codeTableCountFiltered: (shown, total) =>
     `Code table count ${shown} / ${total}`,
   codeTableSearchPlaceholder: "Search code table…",
   codeTableSearchEmpty: "No matching code-table entries.",
-  codeTableEmpty: "No code-table entries yet.",
-  codeTablePickSpace: "Select a knowledge space to manage its code table.",
+  codeTableEmpty:
+    "No industry tags configured for this knowledge space yet. Create one to get started.",
+  codeTablePickSpace: "Select a knowledge space to manage tags.",
+  codeTableIndustryTags: "Industry tags",
+  codeTableIndustryTagsEmpty: "No industry tags configured for this space.",
+  codeTableTags: "Document tags",
+  codeTableTagsEmpty:
+    "No tags yet. Each scenario gets a default “general” tag; add more via config.yaml lanes or future tag editing.",
+  codeTableKindsEmpty: "No document kinds configured.",
+  codeTableTagGroupsEmpty: "No tag groups configured.",
+  codeTableScenarios: "Retrieval scenarios",
+  codeTableScenariosEmpty:
+    "No scenarios bound to this space yet. Create one to attach catalog entries here.",
   codeTableKinds: "Document kinds",
   codeTableTagGroups: "Tag groups",
   codeTableEntryCode: "Code",
@@ -238,7 +269,9 @@ export const knowledgeEnUS: KnowledgeTranslations = {
       : `Moved ${count} code-table entries to the selected space`,
   codeTableOpenSpace: "Open space",
   createScenario: "New entry",
+  createIndustryTag: "New industry tag",
   editScenario: "Edit entry",
+  editIndustryTag: "Edit industry tag",
   codeTableEntryLabel: "Display name",
   codeTableEntryLabelPlaceholder: "e.g. Policy review",
   codeTableEntryCodePlaceholder: "e.g. finance-review",
@@ -252,6 +285,16 @@ export const knowledgeEnUS: KnowledgeTranslations = {
   scenarioCreated: "Code-table entry created",
   scenarioUpdated: "Code-table entry updated",
   scenarioDeleted: "Code-table entry deleted",
+  industryTagCreated: "Industry tag created",
+  industryTagUpdated: "Industry tag updated",
+  industryTagDeleted: "Industry tag deleted",
+  fieldKeywords: "Keywords",
+  fieldDepartment: "Departments",
+  fieldAliases: "Aliases",
+  industryTagCodePlaceholder: "e.g. 文娱",
+  industryTagKeywordsPlaceholder: "One keyword per line",
+  industryTagDepartmentPlaceholder: "One department per line",
+  industryTagAliasesPlaceholder: "One alias per line",
   fieldTopK: "Top K",
   fieldScore: "Score threshold",
   editSpace: "Edit space",
@@ -434,7 +477,9 @@ export const knowledgeEnUS: KnowledgeTranslations = {
   kinds: {},
   scenarios: {},
   tagGroups: {},
-  tags: {},
+  tags: {
+    general: "General",
+  },
 };
 
 export const knowledgeZhCN: KnowledgeTranslations = {
@@ -450,16 +495,26 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   emptySpaces: "还没有知识空间",
   spaceCount: "{count} 个空间",
   createSpace: "新建空间",
-  codeTableButton: "码表管理",
-  codeTableTitle: "码表管理",
-  codeTableDescription: "管理当前知识库下的码表，各知识库独立维护。",
-  codeTableListTitle: "码表管理",
+  codeTableButton: "标签管理",
+  codeTableTitle: "标签管理",
+  codeTableDescription:
+    "管理文档分类、标签与标签组；入库时打标，检索时按标签过滤",
+  codeTableListTitle: "标签管理",
   codeTableCountTotal: (count) => `码表数量 ${count}`,
   codeTableCountFiltered: (shown, total) => `码表数量 ${shown} / ${total}`,
   codeTableSearchPlaceholder: "检索码表信息…",
   codeTableSearchEmpty: "没有匹配的码表项。",
-  codeTableEmpty: "当前知识库暂无码表条目。",
+  codeTableEmpty: "当前知识库暂无行业标签，可先新建行业标签。",
   codeTablePickSpace: "请先选择要管理的知识库。",
+  codeTableIndustryTags: "行业标签",
+  codeTableIndustryTagsEmpty: "当前知识库暂无行业标签。",
+  codeTableTags: "文档标签",
+  codeTableTagsEmpty:
+    "暂无标签。每个场景会自动带有默认「通用」标签；更多标签可通过 config.yaml 的 lanes 配置。",
+  codeTableKindsEmpty: "暂无文档分类。",
+  codeTableTagGroupsEmpty: "暂无标签组。",
+  codeTableScenarios: "检索场景",
+  codeTableScenariosEmpty: "当前知识库尚未绑定检索场景，可新建场景进行关联。",
   codeTableKinds: "文档分类",
   codeTableTagGroups: "标签组",
   codeTableEntryCode: "编码",
@@ -474,7 +529,9 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   codeTableMigrated: (count) => `已将 ${count} 条码表迁移至所选知识库`,
   codeTableOpenSpace: "打开知识库",
   createScenario: "新建码表",
+  createIndustryTag: "新建行业标签",
   editScenario: "编辑码表",
+  editIndustryTag: "编辑行业标签",
   codeTableEntryLabel: "名称",
   codeTableEntryLabelPlaceholder: "例如：制度预审",
   codeTableEntryCodePlaceholder: "例如：finance-review",
@@ -487,6 +544,16 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   scenarioCreated: "码表已创建",
   scenarioUpdated: "码表已更新",
   scenarioDeleted: "码表已删除",
+  industryTagCreated: "行业标签已创建",
+  industryTagUpdated: "行业标签已更新",
+  industryTagDeleted: "行业标签已删除",
+  fieldKeywords: "关键词",
+  fieldDepartment: "部门",
+  fieldAliases: "别名",
+  industryTagCodePlaceholder: "如：文娱",
+  industryTagKeywordsPlaceholder: "每行一个关键词",
+  industryTagDepartmentPlaceholder: "每行一个部门",
+  industryTagAliasesPlaceholder: "每行一个别名",
   fieldTopK: "召回条数",
   fieldScore: "相似度阈值",
   editSpace: "编辑空间",
@@ -666,5 +733,7 @@ export const knowledgeZhCN: KnowledgeTranslations = {
   kinds: {},
   scenarios: {},
   tagGroups: {},
-  tags: {},
+  tags: {
+    general: "通用",
+  },
 };

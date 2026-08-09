@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import { apiKeysZhCN } from "./api-keys";
+import { codeTableZhCN } from "./code-table";
 import { knowledgeZhCN } from "./knowledge";
 import type { Translations } from "./types";
 
@@ -272,8 +273,11 @@ export const zhCN: Translations = {
     scheduledTasks: "定时任务",
     agentsDisabledTooltip: "功能未启用",
     knowledge: "知识库",
+    codeTable: "码表管理",
     apiKeys: "API 密钥",
   },
+
+  codeTable: codeTableZhCN,
 
   // 定时任务
   scheduledTasks: {

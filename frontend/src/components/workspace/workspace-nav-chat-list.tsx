@@ -6,6 +6,7 @@ import {
   CalendarClock,
   KeyRoundIcon,
   MessagesSquare,
+  TablePropertiesIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -103,6 +104,23 @@ export function WorkspaceNavChatList() {
             <Link className="text-muted-foreground" href="/workspace/knowledge">
               <BookOpenIcon />
               <span>{t.sidebar.knowledge}</span>
+            </Link>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            isActive={
+              pathname.startsWith("/workspace/code-table") ||
+              pathname.startsWith("/workspace/knowledge/scenarios")
+            }
+            asChild
+          >
+            <Link
+              className="text-muted-foreground"
+              href="/workspace/code-table"
+            >
+              <TablePropertiesIcon />
+              <span>{t.sidebar.codeTable}</span>
             </Link>
           </SidebarMenuButton>
         </SidebarMenuItem>

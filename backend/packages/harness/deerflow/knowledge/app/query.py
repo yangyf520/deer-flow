@@ -24,6 +24,7 @@ from deerflow.knowledge.contract import (
 )
 from deerflow.knowledge.engine.evidence import user_attrs_from_metadata
 from deerflow.knowledge.engine.search import (
+    filter_hits_by_catalog,
     filter_hits_by_document_state,
     get_scenario_config,
     merge_space_hits,
@@ -273,6 +274,8 @@ async def search(
     scenario: str | None = None,
     as_of_date: str | None = None,
     fusion_queries: int | None = None,
+    tags: list[str] | None = None,
+    kinds: list[str] | None = None,
 ) -> EvidencePackResponse:
     from fastapi import HTTPException
 
@@ -352,6 +355,7 @@ async def search(
         rows = (await session.execute(select(KnowledgeDocumentRow).where(KnowledgeDocumentRow.id.in_(doc_ids)))).scalars().all()
         doc_meta = {r.id: r for r in rows}
     raw = filter_hits_by_document_state(raw, doc_meta, as_of=as_of_dt)
+    raw = filter_hits_by_catalog(raw, doc_meta, tags=tags, kinds=kinds)
     raw = rank_by_temporal(raw, query=query, as_of=as_of_dt)
     raw = stable_rank_items(raw)[:final_top_k]
     items = [EvidenceItem.model_validate(x) for x in raw]

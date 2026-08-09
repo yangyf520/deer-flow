@@ -69,6 +69,7 @@ import {
 } from "@/components/workspace/knowledge";
 import { Tooltip } from "@/components/workspace/tooltip";
 import { useAuth } from "@/core/auth/AuthProvider";
+import { loadKnowledgeCodeTable } from "@/core/code-table/api";
 import { useI18n } from "@/core/i18n/hooks";
 import type { Translations } from "@/core/i18n/locales/types";
 import {
@@ -80,7 +81,6 @@ import {
   effectiveToLocalValue,
   getSpace,
   importDocument,
-  listCodeTable,
   listDocumentChunks,
   listDocuments,
   localValueToEffectiveTo,
@@ -340,7 +340,7 @@ export default function KnowledgeSpaceDocumentsPage() {
   }, [spaceId]);
 
   useEffect(() => {
-    void listCodeTable()
+    void loadKnowledgeCodeTable()
       .then((res) => {
         setScenarios(res.scenarios);
         setTagGroups(res.tag_groups);
@@ -626,9 +626,7 @@ export default function KnowledgeSpaceDocumentsPage() {
         size="sm"
         className="h-8 w-24 shrink-0 justify-center px-0"
       >
-        <Link
-          href={`/workspace/knowledge/scenarios?host=${encodeURIComponent(spaceId)}`}
-        >
+        <Link href="/workspace/code-table/knowledge">
           <TablePropertiesIcon className="size-3.5" />
           {t.knowledge.codeTableButton}
         </Link>

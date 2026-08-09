@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 
@@ -19,8 +19,9 @@ from deerflow.knowledge.contract import (
     DocumentsListResponse,
     DocumentUpdateRequest,
     EvidencePackResponse,
+    IndustryTagDefinitionRequest,
     KindsListResponse,
-    KnowledgeCatalogResponse,
+    KnowledgeIndustryTagResponse,
     KnowledgeSearchRequest,
     MigrateCatalogHostRequest,
     MigrateCatalogHostResponse,
@@ -100,25 +101,14 @@ async def list_scenarios(request: Request) -> ScenariosListResponse:
     return ScenariosListResponse(items=catalog.scenarios, total=len(catalog.scenarios))
 
 
-@router.get("/catalog", response_model=KnowledgeCatalogResponse)
-@require_auth
-@require_permission("knowledge", "read")
-async def list_catalog(request: Request) -> KnowledgeCatalogResponse:
-    """Knowledge code catalog from DB (pub_codes): scenarios, kinds, tags, tag_groups."""
-    locale = _request_locale(request)
-    factory = _session_factory()
-    async with factory() as session:
-        return await kb_codes.get_knowledge_catalog_from_db(session, locale=locale)
-
-
-@router.post("/catalog/migrate-host", response_model=MigrateCatalogHostResponse)
+@router.post("/scenarios/migrate-host", response_model=MigrateCatalogHostResponse)
 @require_auth
 @require_permission("knowledge", "write")
-async def migrate_catalog_host(
+async def migrate_scenario_host(
     body: MigrateCatalogHostRequest,
     request: Request,
 ) -> MigrateCatalogHostResponse:
-    """Move all catalog scenarios to another knowledge space (码表归属迁移)."""
+    """Assign knowledge code-table scenarios to a knowledge space (host_space_id)."""
     factory = _session_factory()
     async with factory() as session:
         from deerflow.knowledge.app.codes import migrate_catalog_host as migrate_host
@@ -181,6 +171,63 @@ async def upsert_scenario(code: str, body: ScenarioDefinitionRequest, request: R
     if pack is None:
         raise HTTPException(status_code=500, detail="scenario upsert failed")
     return pack
+
+
+@router.put("/industry-tags/{code}", response_model=KnowledgeIndustryTagResponse)
+@require_auth
+@require_permission("knowledge", "write")
+async def upsert_industry_tag(
+    code: str,
+    body: IndustryTagDefinitionRequest,
+    request: Request,
+) -> KnowledgeIndustryTagResponse:
+    if body.code != code:
+        raise HTTPException(status_code=422, detail="industry tag code in path and body must match")
+    _ = request
+    factory = _session_factory()
+    async with factory() as session:
+        from deerflow.knowledge.app.codes import TYPE_INDUSTRY_TAG, industry_tag_api_payload
+        from deerflow.pub_codes.bundle import KNOWLEDGE_DOMAIN
+        from deerflow.pub_codes.entries import upsert_flat_entry
+
+        attrs: dict[str, Any] = {
+            "department": body.department,
+            "keywords": body.keywords,
+            "aliases": body.aliases,
+        }
+        if body.space_id:
+            attrs["space_id"] = body.space_id.strip()
+        row = await upsert_flat_entry(
+            session,
+            domain=KNOWLEDGE_DOMAIN,
+            type_key=TYPE_INDUSTRY_TAG,
+            code=body.code,
+            label=body.label,
+            attrs=attrs,
+        )
+        payload = industry_tag_api_payload(row)
+    return KnowledgeIndustryTagResponse.model_validate(payload)
+
+
+@router.delete("/industry-tags/{code}", status_code=204)
+@require_auth
+@require_permission("knowledge", "write")
+async def delete_industry_tag(code: str, request: Request) -> None:
+    _ = request
+    factory = _session_factory()
+    async with factory() as session:
+        from deerflow.knowledge.app.codes import TYPE_INDUSTRY_TAG
+        from deerflow.pub_codes.bundle import KNOWLEDGE_DOMAIN
+        from deerflow.pub_codes.entries import delete_flat_entry
+
+        deleted = await delete_flat_entry(
+            session,
+            domain=KNOWLEDGE_DOMAIN,
+            type_key=TYPE_INDUSTRY_TAG,
+            code=code,
+        )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="industry tag not found")
 
 
 @router.delete("/scenarios/{code}", status_code=204)
@@ -573,6 +620,8 @@ async def search(body: KnowledgeSearchRequest, request: Request) -> EvidencePack
             similarity_cutoff=body.similarity_cutoff,
             knowledge_version=body.knowledge_version,
             scenario=body.scenario,
+            tags=body.tags,
+            kinds=body.kinds,
         )
 
 

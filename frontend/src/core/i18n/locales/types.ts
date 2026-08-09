@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 
 import type { ApiKeysTranslations } from "./api-keys";
+import type { CodeTableTranslations } from "./code-table";
 import type { KnowledgeTranslations } from "./knowledge";
 
 export interface Translations {
@@ -218,8 +219,11 @@ export interface Translations {
     agentsDisabledTooltip: string;
     channels: string;
     knowledge: string;
+    codeTable: string;
     apiKeys: string;
   };
+
+  codeTable: CodeTableTranslations;
 
   // Scheduled tasks
   scheduledTasks: {

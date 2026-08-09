@@ -102,6 +102,31 @@ def test_filter_hits_by_document_state_uses_live_document_row():
     assert [hit["id"] for hit in filtered] == ["chunk-2"]
 
 
+def test_filter_hits_by_catalog_tags_and_kinds():
+    from types import SimpleNamespace
+
+    from deerflow.knowledge.engine.search import catalog_tags_match, filter_hits_by_catalog
+
+    assert catalog_tags_match({"general"}, {"entertainment"}) is True
+    assert catalog_tags_match({"entertainment"}, {"entertainment"}) is True
+    assert catalog_tags_match({"healthcare"}, {"entertainment"}) is False
+
+    doc_meta = {
+        "doc-a": SimpleNamespace(kind="legal-clause", tags=["general"]),
+        "doc-b": SimpleNamespace(kind="legal-clause", tags=["entertainment"]),
+        "doc-c": SimpleNamespace(kind="rule-checkpoint", tags=["entertainment"]),
+        "doc-d": SimpleNamespace(kind="legal-clause", tags=["healthcare"]),
+    }
+    hits = [
+        {"id": "h1", "metadata": {"doc_id": "doc-a", "tags": "general", "kind": "legal-clause"}},
+        {"id": "h2", "metadata": {"doc_id": "doc-b", "tags": "entertainment", "kind": "legal-clause"}},
+        {"id": "h3", "metadata": {"doc_id": "doc-c", "tags": "entertainment", "kind": "rule-checkpoint"}},
+        {"id": "h4", "metadata": {"doc_id": "doc-d", "tags": "healthcare", "kind": "legal-clause"}},
+    ]
+    filtered = filter_hits_by_catalog(hits, doc_meta, tags=["entertainment"], kinds=["legal-clause"])
+    assert [hit["id"] for hit in filtered] == ["h1", "h2"]
+
+
 def test_pg_params_prefer_connection_string():
     from deerflow.config.knowledge_config import KnowledgeVectorStoreConfig
 
@@ -1141,10 +1166,10 @@ def test_kinds_api_lists_catalog():
         assert body["total"] == len(body["items"])
 
 
-def test_knowledge_catalog_api():
+def test_knowledge_code_table_api():
     client = TestClient(_api_app())
     res = client.get(
-        "/api/v1/knowledge/catalog",
+        "/api/v1/code-table/bundle?domain=knowledge",
         headers={"Authorization": "Bearer test-token"},
     )
     assert res.status_code in (200, 401, 403)
@@ -1405,3 +1430,120 @@ def test_search_space_returns_custom_chunk_metadata():
         items = retrieve_across_spaces(space_ids=["legal"], query="test", final_top_k=5, pool_k=5)
     assert items[0]["metadata"]["row_no"] == 7
     assert items[0]["metadata"]["batch_id"] == "b-1"
+
+
+@pytest.fixture
+async def pub_codes_session(tmp_path):
+    from deerflow.persistence.engine import close_engine, get_session_factory, init_engine
+
+    url = f"sqlite+aiosqlite:///{tmp_path / 'pub_codes.db'}"
+    await init_engine("sqlite", url=url, sqlite_dir=str(tmp_path))
+    factory = get_session_factory()
+    async with factory() as session:
+        yield session
+    await close_engine()
+
+
+@pytest.mark.anyio
+async def test_industry_tag_roundtrip_via_pub_codes(pub_codes_session):
+    from deerflow.knowledge.app.codes import (
+        KNOWLEDGE_DOMAIN,
+        TYPE_INDUSTRY_TAG,
+        build_catalog,
+        industry_tag_api_payload,
+        refresh_cache,
+    )
+    from deerflow.pub_codes.entries import delete_flat_entry, upsert_flat_entry
+
+    row = await upsert_flat_entry(
+        pub_codes_session,
+        domain=KNOWLEDGE_DOMAIN,
+        type_key=TYPE_INDUSTRY_TAG,
+        code="测试行业",
+        label="测试行业展示名",
+        attrs={
+            "keywords": ["关键词A", "关键词B"],
+            "department": ["测试部门"],
+        },
+    )
+    payload = industry_tag_api_payload(row)
+    assert payload["id"] == "测试行业"
+    assert payload["keywords"] == ["关键词A", "关键词B"]
+
+    updated = await upsert_flat_entry(
+        pub_codes_session,
+        domain=KNOWLEDGE_DOMAIN,
+        type_key=TYPE_INDUSTRY_TAG,
+        code="测试行业",
+        label="更新标签",
+        attrs={"keywords": ["新关键词"]},
+    )
+    assert updated.label == "更新标签"
+    assert updated.attrs["keywords"] == ["新关键词"]
+
+    cache = await refresh_cache(pub_codes_session)
+    catalog = build_catalog(cache)
+    assert any(tag["id"] == "测试行业" for tag in catalog["industry_tags"])
+
+    assert await delete_flat_entry(
+        pub_codes_session,
+        domain=KNOWLEDGE_DOMAIN,
+        type_key=TYPE_INDUSTRY_TAG,
+        code="测试行业",
+    )
+    assert (
+        await delete_flat_entry(
+            pub_codes_session,
+            domain=KNOWLEDGE_DOMAIN,
+            type_key=TYPE_INDUSTRY_TAG,
+            code="测试行业",
+        )
+        is False
+    )
+
+
+@pytest.mark.anyio
+async def test_register_code_table_domain(pub_codes_session):
+    from deerflow.pub_codes.domains import list_domain_summaries, register_domain
+
+    row = await register_domain(pub_codes_session, domain="legal", type_key="industry_tag", label="法务码表")
+    assert row.domain == "legal"
+    assert row.type_key == "industry_tag"
+    assert row.code == "_category"
+    assert row.label == "法务码表"
+    assert row.attrs == {}
+
+    summaries = await list_domain_summaries(pub_codes_session)
+    legal = next(item for item in summaries if item["domain"] == "legal")
+    assert legal["label"] == "法务码表"
+    assert legal["type_key"] == "industry_tag"
+    assert legal["entry_count"] == 0
+
+
+@pytest.mark.anyio
+async def test_delete_code_table_domain_clears_pub_codes(pub_codes_session):
+    from sqlalchemy import select
+
+    from deerflow.knowledge.app.codes import KNOWLEDGE_DOMAIN, TYPE_INDUSTRY_TAG
+    from deerflow.persistence.pub_codes.model import PubCodeRow
+    from deerflow.pub_codes.domains import delete_domain_rows, list_domain_summaries
+    from deerflow.pub_codes.entries import upsert_flat_entry
+
+    await upsert_flat_entry(
+        pub_codes_session,
+        domain=KNOWLEDGE_DOMAIN,
+        type_key=TYPE_INDUSTRY_TAG,
+        code="测试",
+        label="测试",
+    )
+    summaries = await list_domain_summaries(pub_codes_session)
+    assert any(row["domain"] == "knowledge" and row["entry_count"] > 0 for row in summaries)
+
+    deleted = await delete_domain_rows(pub_codes_session, domain="knowledge")
+    assert deleted > 0
+
+    rows = list((await pub_codes_session.execute(select(PubCodeRow).where(PubCodeRow.domain == "knowledge"))).scalars().all())
+    assert rows == []
+    summaries_after = await list_domain_summaries(pub_codes_session)
+    knowledge = next(row for row in summaries_after if row["domain"] == "knowledge")
+    assert knowledge["entry_count"] == 0

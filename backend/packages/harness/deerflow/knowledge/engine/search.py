@@ -106,6 +106,72 @@ def document_retrieval_allowed(row: Any, as_of: datetime) -> bool:
     return metadata_retrieval_allowed(meta, as_of)
 
 
+_UNIVERSAL_TAG_CODES = frozenset({"general", "通用"})
+
+
+def _normalize_tag_codes(raw: Any) -> set[str]:
+    if raw is None:
+        return set()
+    if isinstance(raw, list):
+        parts = raw
+    elif isinstance(raw, str):
+        parts = raw.split(",")
+    else:
+        return set()
+    return {str(t).strip().lower() for t in parts if str(t).strip()}
+
+
+def _hit_doc_tags(meta: dict[str, Any], row: Any | None) -> set[str]:
+    if row is not None:
+        tags = _normalize_tag_codes(getattr(row, "tags", None))
+        if tags:
+            return tags
+    return _normalize_tag_codes(meta.get("tags"))
+
+
+def _hit_doc_kind(meta: dict[str, Any], row: Any | None) -> str:
+    if row is not None:
+        kind = str(getattr(row, "kind", "") or "").strip()
+        if kind:
+            return kind.lower()
+    return str(meta.get("kind") or "").strip().lower()
+
+
+def catalog_tags_match(doc_tags: set[str], filter_tags: set[str]) -> bool:
+    """Doc matches when it shares a filter tag or is tagged universal (general)."""
+    if not filter_tags:
+        return True
+    if not doc_tags:
+        return False
+    if doc_tags & filter_tags:
+        return True
+    return bool(doc_tags & _UNIVERSAL_TAG_CODES)
+
+
+def filter_hits_by_catalog(
+    hits: list[dict[str, Any]],
+    doc_meta: dict[str, Any],
+    *,
+    tags: list[str] | None = None,
+    kinds: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    filter_tags = _normalize_tag_codes(tags)
+    filter_kinds = _normalize_tag_codes(kinds)
+    if not filter_tags and not filter_kinds:
+        return hits
+    kept: list[dict[str, Any]] = []
+    for hit in hits:
+        meta = hit.get("metadata") if isinstance(hit.get("metadata"), dict) else {}
+        did = str(meta.get("doc_id") or "").strip()
+        row = doc_meta.get(did) if did else None
+        if not catalog_tags_match(_hit_doc_tags(meta, row), filter_tags):
+            continue
+        if filter_kinds and _hit_doc_kind(meta, row) not in filter_kinds:
+            continue
+        kept.append(hit)
+    return kept
+
+
 def filter_hits_by_document_state(
     hits: list[dict[str, Any]],
     doc_meta: dict[str, Any],

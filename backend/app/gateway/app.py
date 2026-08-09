@@ -19,6 +19,7 @@ from app.gateway.routers import (
     auth,
     channel_connections,
     channels,
+    code_table,
     console,
     doc,
     features,
@@ -486,6 +487,8 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
 
     # Knowledge API is mounted at /api/v1/knowledge
     app.include_router(knowledge.router)
+    # Generic code-table (pub_codes) by domain; knowledge is one domain view
+    app.include_router(code_table.router)
 
     # Document API: /api/v1/document/parse
     # Knowledge import: POST /api/v1/knowledge/spaces/{space_id}/documents
