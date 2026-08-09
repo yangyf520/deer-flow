@@ -93,6 +93,42 @@ def metadata_retrieval_allowed(meta: dict[str, Any], as_of: datetime) -> bool:
     return True
 
 
+def document_retrieval_allowed(row: Any, as_of: datetime) -> bool:
+    """Authoritative retrieval gate from the live knowledge document row."""
+    attrs = row.attrs if isinstance(getattr(row, "attrs", None), dict) else {}
+    meta = dict(attrs)
+    eff_from = getattr(row, "effective_from", None)
+    eff_to = getattr(row, "effective_to", None)
+    if eff_from is not None:
+        meta["effective_from"] = eff_from.isoformat()
+    if eff_to is not None:
+        meta["effective_to"] = eff_to.isoformat()
+    return metadata_retrieval_allowed(meta, as_of)
+
+
+def filter_hits_by_document_state(
+    hits: list[dict[str, Any]],
+    doc_meta: dict[str, Any],
+    *,
+    as_of: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Drop hits whose source document is disabled or outside its effective window."""
+    if not hits or not doc_meta:
+        return hits
+    as_of_dt = as_of or datetime.now(UTC)
+    kept: list[dict[str, Any]] = []
+    for hit in hits:
+        did = str((hit.get("metadata") or {}).get("doc_id") or "").strip()
+        if not did:
+            kept.append(hit)
+            continue
+        row = doc_meta.get(did)
+        if row is not None and not document_retrieval_allowed(row, as_of_dt):
+            continue
+        kept.append(hit)
+    return kept
+
+
 def clause_boost(
     item: dict[str, Any],
     anchors: list[str],

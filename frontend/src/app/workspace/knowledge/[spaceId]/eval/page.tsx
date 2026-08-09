@@ -319,6 +319,7 @@ export default function KnowledgeEvalPage() {
           query: q,
           spaces: [spaceId],
           top_k: retrieval.top_k,
+          similarity_cutoff: retrieval.score,
         });
         next.push({
           q,

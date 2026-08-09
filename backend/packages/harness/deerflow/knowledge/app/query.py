@@ -24,12 +24,12 @@ from deerflow.knowledge.contract import (
 )
 from deerflow.knowledge.engine.evidence import user_attrs_from_metadata
 from deerflow.knowledge.engine.search import (
+    filter_hits_by_document_state,
     get_scenario_config,
     merge_space_hits,
     parse_as_of,
     rank_by_temporal,
     resolve_scenario,
-    retrieve_across_spaces,
     retrieve_in_space,
     space_budgets,
     stable_rank_items,
@@ -61,87 +61,84 @@ def compute_precision_recall_at_k(
     return precision, recall
 
 
-def evaluate_search_cases(
+def _evidence_item_to_eval_item(item: EvidenceItem) -> dict[str, Any]:
+    meta = item.metadata or {}
+    return {
+        "id": item.id,
+        "title": item.title or "",
+        "snippet": item.snippet or "",
+        "score": item.score,
+        "citable_as": item.citable_as or "",
+        "kind": item.kind or "general",
+        "doc_id": meta.get("doc_id"),
+        "space_id": meta.get("space_id"),
+        "heading_path": meta.get("heading_path"),
+        "page_no": meta.get("page_no"),
+        "block": meta.get("block") or "text",
+        "source_filename": meta.get("source_filename"),
+        "doc_title": meta.get("doc_title"),
+    }
+
+
+def _eval_case_from_pack(
     *,
-    space_ids: list[str],
-    cases: list[dict[str, Any]],
-    top_k: int = 5,
+    q: str,
+    needles: list[str],
+    relevant_doc_ids: list[str],
+    pack: EvidencePackResponse,
+    top_k: int,
 ) -> dict[str, Any]:
-    """Run retrieval eval cases and aggregate Precision@k / Recall@k / needle hit rate."""
-    per_case: list[dict[str, Any]] = []
+    items = [_evidence_item_to_eval_item(it) for it in pack.items]
+    retrieved_docs: list[str] = []
+    for item in items:
+        did = item.get("doc_id")
+        if did and str(did) not in retrieved_docs:
+            retrieved_docs.append(str(did))
+    blob = "\n".join(str(item.get("snippet") or "") for item in items)
+    needle_ok = (not needles) or any(n in blob for n in needles)
+    precision_at_k: float | None = None
+    recall_at_k: float | None = None
+    if relevant_doc_ids:
+        precision_at_k, recall_at_k = compute_precision_recall_at_k(
+            retrieved_doc_ids=retrieved_docs,
+            relevant_doc_ids=relevant_doc_ids,
+            k=top_k,
+        )
+    return {
+        "q": q,
+        "hits": len(items),
+        "items": items,
+        "retrieved_doc_ids": retrieved_docs,
+        "relevant_doc_ids": relevant_doc_ids,
+        "needle_hit": needle_ok,
+        "precision_at_k": precision_at_k,
+        "recall_at_k": recall_at_k,
+        "top_score": items[0].get("score") if items else None,
+    }
+
+
+def _summarize_eval_cases(cases: list[dict[str, Any]], *, top_k: int) -> dict[str, Any]:
     precisions: list[float] = []
     recalls: list[float] = []
     needle_hits = 0
     labeled = 0
-
-    for raw in cases:
-        q = str(raw.get("q") or raw.get("query") or "").strip()
-        if not q:
-            continue
-        needles = [str(n) for n in (raw.get("needles") or []) if n]
-        relevant = [str(d) for d in (raw.get("relevant_doc_ids") or raw.get("relevant_ids") or []) if d]
-        hits = retrieve_across_spaces(space_ids=space_ids, query=q, final_top_k=top_k, pool_k=top_k)
-        retrieved_docs: list[str] = []
-        for h in hits:
-            did = (h.get("metadata") or {}).get("doc_id")
-            if did and did not in retrieved_docs:
-                retrieved_docs.append(str(did))
-        blob = "\n".join(str(h.get("snippet") or "") for h in hits)
-        needle_ok = (not needles) or any(n in blob for n in needles)
-        needle_hits += int(needle_ok)
-
-        if relevant:
+    for case in cases:
+        needle_hits += int(bool(case.get("needle_hit")))
+        if case.get("relevant_doc_ids"):
             labeled += 1
-            p, r = compute_precision_recall_at_k(
-                retrieved_doc_ids=retrieved_docs,
-                relevant_doc_ids=relevant,
-                k=top_k,
-            )
-            precisions.append(p)
-            recalls.append(r)
-        else:
-            p, r = None, None
-
-        per_case.append(
-            {
-                "q": q,
-                "hits": len(hits),
-                "items": [
-                    {
-                        "id": h.get("id"),
-                        "title": h.get("title") or "",
-                        "snippet": h.get("snippet") or "",
-                        "score": h.get("score"),
-                        "citable_as": h.get("citable_as") or "",
-                        "kind": h.get("kind") or "general",
-                        "doc_id": (h.get("metadata") or {}).get("doc_id"),
-                        "space_id": (h.get("metadata") or {}).get("space_id"),
-                        "heading_path": (h.get("metadata") or {}).get("heading_path"),
-                        "page_no": (h.get("metadata") or {}).get("page_no"),
-                        "block": (h.get("metadata") or {}).get("block") or "text",
-                        "source_filename": None,
-                        "doc_title": None,
-                    }
-                    for h in hits
-                ],
-                "retrieved_doc_ids": retrieved_docs,
-                "relevant_doc_ids": relevant,
-                "needle_hit": needle_ok,
-                "precision_at_k": p,
-                "recall_at_k": r,
-                "top_score": hits[0].get("score") if hits else None,
-            }
-        )
-
-    n = max(len(per_case), 1)
+            if case.get("precision_at_k") is not None:
+                precisions.append(float(case["precision_at_k"]))
+            if case.get("recall_at_k") is not None:
+                recalls.append(float(case["recall_at_k"]))
+    n = max(len(cases), 1)
     return {
         "top_k": top_k,
-        "case_count": len(per_case),
+        "case_count": len(cases),
         "needle_hit_rate": needle_hits / n,
         "precision_at_k": (sum(precisions) / len(precisions)) if precisions else None,
         "recall_at_k": (sum(recalls) / len(recalls)) if recalls else None,
         "labeled_case_count": labeled,
-        "cases": per_case,
+        "cases": cases,
     }
 
 
@@ -167,43 +164,45 @@ async def eval_recall(
     spaces: list[str] | None,
     cases: list[RecallEvalCase],
     top_k: int = 5,
+    scenario: str | None = None,
+    knowledge_version: str = "current",
+    similarity_cutoff: float | None = None,
+    as_of_date: str | None = None,
 ) -> RecallEvalResponse:
-    """Run Precision@k / Recall@k / needle eval on accessible spaces."""
+    """Run Precision@k / Recall@k / needle eval via the same retrieval path as ``search()``."""
     accessible = await list_accessible_spaces(session, user_id=user_id, system_role=system_role)
     allowed_ids = {s.id for s in accessible}
-    space_ids = _resolve_search_space_ids(spaces, allowed_ids)
-    if not space_ids:
+    if _resolve_search_space_ids(spaces, allowed_ids) == []:
         raise HTTPException(status_code=403, detail="No accessible spaces for eval")
 
-    payload = [c.model_dump() for c in cases]
-    result = await asyncio.to_thread(
-        evaluate_search_cases,
-        space_ids=space_ids,
-        cases=payload,
-        top_k=top_k,
-    )
+    per_case: list[dict[str, Any]] = []
+    for case in cases:
+        q = case.q.strip()
+        if not q:
+            continue
+        pack = await search(
+            session,
+            user_id=user_id,
+            system_role=system_role,
+            query=q,
+            spaces=spaces,
+            top_k=top_k,
+            similarity_cutoff=similarity_cutoff,
+            knowledge_version=knowledge_version,
+            scenario=scenario,
+            as_of_date=as_of_date,
+        )
+        per_case.append(
+            _eval_case_from_pack(
+                q=q,
+                needles=[str(n) for n in case.needles if n],
+                relevant_doc_ids=[str(d) for d in case.relevant_doc_ids if d],
+                pack=pack,
+                top_k=top_k,
+            )
+        )
 
-    # Attach document provenance (title / filename) for UI source lines.
-    doc_ids: set[str] = set()
-    for case in result.get("cases") or []:
-        for item in case.get("items") or []:
-            did = item.get("doc_id")
-            if did:
-                doc_ids.add(str(did))
-    doc_meta: dict[str, KnowledgeDocumentRow] = {}
-    if doc_ids:
-        rows = (await session.execute(select(KnowledgeDocumentRow).where(KnowledgeDocumentRow.id.in_(doc_ids)))).scalars().all()
-        doc_meta = {r.id: r for r in rows}
-    for case in result.get("cases") or []:
-        for item in case.get("items") or []:
-            row = doc_meta.get(str(item.get("doc_id") or ""))
-            if row is None:
-                continue
-            item["doc_title"] = row.title
-            item["source_filename"] = row.source_filename
-            if not item.get("title"):
-                item["title"] = row.title
-
+    result = _summarize_eval_cases(per_case, top_k=top_k)
     return RecallEvalResponse(
         top_k=result["top_k"],
         case_count=result["case_count"],
@@ -239,15 +238,18 @@ def _enrich_evidence_items(
             continue
         it.metadata["source_filename"] = row.source_filename
         it.metadata["doc_title"] = row.title
-        if row.effective_from is not None:
-            it.metadata["effective_from"] = row.effective_from.isoformat()
-        if row.effective_to is not None:
-            it.metadata["effective_to"] = row.effective_to.isoformat()
         attrs = row.attrs if isinstance(row.attrs, dict) else {}
         for key, value in attrs.items():
             if key.startswith("_"):
                 continue
-            it.metadata.setdefault(key, value)
+            if key == "enabled":
+                it.metadata["enabled"] = value
+            else:
+                it.metadata.setdefault(key, value)
+        if row.effective_from is not None:
+            it.metadata["effective_from"] = row.effective_from.isoformat()
+        if row.effective_to is not None:
+            it.metadata["effective_to"] = row.effective_to.isoformat()
         if not it.title:
             it.title = row.title
         if not it.citable_as:
@@ -344,14 +346,14 @@ async def search(
         space_results = [{"space_id": sid, "hit_count": len(items)} for sid, items in pairs]
 
     as_of_dt = parse_as_of(as_of_date)
-    raw = rank_by_temporal(raw, query=query, as_of=as_of_dt)
-    raw = stable_rank_items(raw)[:final_top_k]
-
     doc_ids = {str(x.get("metadata", {}).get("doc_id")) for x in raw if x.get("metadata", {}).get("doc_id")}
     doc_meta: dict[str, KnowledgeDocumentRow] = {}
     if doc_ids:
         rows = (await session.execute(select(KnowledgeDocumentRow).where(KnowledgeDocumentRow.id.in_(doc_ids)))).scalars().all()
         doc_meta = {r.id: r for r in rows}
+    raw = filter_hits_by_document_state(raw, doc_meta, as_of=as_of_dt)
+    raw = rank_by_temporal(raw, query=query, as_of=as_of_dt)
+    raw = stable_rank_items(raw)[:final_top_k]
     items = [EvidenceItem.model_validate(x) for x in raw]
     _enrich_evidence_items(
         items,

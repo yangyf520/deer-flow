@@ -275,6 +275,7 @@ class KnowledgeSearchRequest(BaseModel):
     spaces: list[str] | None = None
     scenario: str | None = None
     top_k: int | None = None
+    similarity_cutoff: float | None = Field(default=None, ge=0, le=1)
     knowledge_version: str = "current"
 
 
@@ -287,6 +288,10 @@ class RecallEvalCase(BaseModel):
 class RecallEvalRequest(BaseModel):
     spaces: list[str] | None = None
     top_k: int = Field(default=5, ge=1, le=50)
+    scenario: str | None = None
+    knowledge_version: str = "current"
+    similarity_cutoff: float | None = Field(default=None, ge=0, le=1)
+    as_of_date: str | None = None
     cases: list[RecallEvalCase] = Field(min_length=1)
 
 

@@ -480,6 +480,7 @@ export async function searchKnowledge(input: {
   spaces?: string[];
   scenario?: string;
   top_k?: number;
+  similarity_cutoff?: number;
 }): Promise<EvidencePackResponse> {
   const res = await fetch(`${base()}/search`, {
     method: "POST",

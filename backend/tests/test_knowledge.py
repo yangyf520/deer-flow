@@ -30,9 +30,9 @@ from deerflow.knowledge.app.documents import (
     import_document,
     list_documents,
 )
-from deerflow.knowledge.app.query import attach_user_attrs, compute_precision_recall_at_k, evaluate_search_cases, search
+from deerflow.knowledge.app.query import attach_user_attrs, compute_precision_recall_at_k, eval_recall, search
 from deerflow.knowledge.app.spaces import ensure_kind_allowed, resolve_space_role, role_at_least, upsert_grant
-from deerflow.knowledge.contract import EvidenceItem, parse_embed_segments_json
+from deerflow.knowledge.contract import EvidenceItem, EvidencePackResponse, RecallEvalCase, parse_embed_segments_json
 from deerflow.knowledge.engine.chunk import ContextualTitleTransform, build_node_parser
 from deerflow.knowledge.engine.evidence import (
     annotate_block_type,
@@ -80,6 +80,26 @@ def test_rank_by_temporal_filters_disabled_documents():
     ]
     ranked = rank_by_temporal(items, query="", as_of=datetime(2026, 8, 8, tzinfo=UTC))
     assert [item["id"] for item in ranked] == ["a"]
+
+
+def test_filter_hits_by_document_state_uses_live_document_row():
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from deerflow.knowledge.engine.search import filter_hits_by_document_state
+
+    as_of = datetime(2026, 8, 8, tzinfo=UTC)
+    row = SimpleNamespace(
+        attrs={"enabled": False},
+        effective_from=None,
+        effective_to=None,
+    )
+    hits = [
+        {"id": "chunk-1", "score": 0.9, "metadata": {"doc_id": "doc-a", "enabled": True}},
+        {"id": "chunk-2", "score": 0.8, "metadata": {"doc_id": "doc-b", "enabled": True}},
+    ]
+    filtered = filter_hits_by_document_state(hits, {"doc-a": row}, as_of=as_of)
+    assert [hit["id"] for hit in filtered] == ["chunk-2"]
 
 
 def test_pg_params_prefer_connection_string():
@@ -908,6 +928,65 @@ async def test_search_applies_scenario_pack():
 
 
 @pytest.mark.asyncio
+async def test_search_excludes_disabled_document():
+    disabled_row = SimpleNamespace(
+        id="doc-disabled",
+        title="Disabled",
+        source_filename=None,
+        attrs={"enabled": False},
+        effective_from=None,
+        effective_to=None,
+    )
+    space = SimpleNamespace(
+        id="legal",
+        default_scenarios=[],
+        name="legal",
+        description=None,
+        access="open",
+        owner_user_id="u1",
+        allowed_kinds=[],
+        created_at=None,
+        updated_at=None,
+        attrs={"top_k": 8, "score": 0.35},
+    )
+    hit = {
+        "id": "n1",
+        "source": "chunk",
+        "kind": "general",
+        "title": "Disabled",
+        "snippet": "should not surface",
+        "score": 0.99,
+        "citable_as": "Disabled",
+        "metadata": {"doc_id": "doc-disabled", "space_id": "legal", "enabled": True},
+    }
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = [disabled_row]
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=result)
+
+    with (
+        patch(
+            "deerflow.knowledge.app.query.list_accessible_spaces",
+            new=AsyncMock(return_value=[space]),
+        ),
+        patch(
+            "deerflow.knowledge.app.query.retrieve_in_space",
+            return_value=[hit],
+        ),
+    ):
+        pack = await search(
+            session,
+            user_id="u1",
+            system_role="user",
+            query="license-ca",
+            spaces=["legal"],
+            top_k=5,
+        )
+
+    assert pack.items == []
+
+
+@pytest.mark.asyncio
 async def test_search_merges_parallel_spaces():
     from deerflow.config.knowledge_config import (
         KnowledgeConfig,
@@ -1120,19 +1199,43 @@ class TestKnowledgeSpaceMerge:
             out = retrieve_in_space(space_id="legal", query="q", top_k=2)
         assert {x["id"] for x in out} == {"a1", "b1"}
 
-    def test_evaluate_search_cases_needle_hit(self):
-        from unittest.mock import patch
-
-        with patch(
-            "deerflow.knowledge.app.query.retrieve_across_spaces",
-            return_value=[{"snippet": "合规要求说明", "metadata": {"doc_id": "d1", "release": "current"}}],
+    @pytest.mark.asyncio
+    async def test_eval_recall_needle_hit_uses_search(self):
+        pack = EvidencePackResponse(
+            knowledge_version="current",
+            trace_id="trace-1",
+            items=[
+                EvidenceItem(
+                    id="n1",
+                    source="chunk",
+                    kind="general",
+                    title="t",
+                    snippet="合规要求说明",
+                    score=0.9,
+                    citable_as="t",
+                    metadata={"doc_id": "d1", "space_id": "legal"},
+                )
+            ],
+        )
+        space = SimpleNamespace(id="legal")
+        with (
+            patch(
+                "deerflow.knowledge.app.query.list_accessible_spaces",
+                new=AsyncMock(return_value=[space]),
+            ),
+            patch("deerflow.knowledge.app.query.search", new=AsyncMock(return_value=pack)) as mock_search,
         ):
-            result = evaluate_search_cases(
-                space_ids=["legal"],
-                cases=[{"q": "合规要求", "needles": ["合规"]}],
+            result = await eval_recall(
+                AsyncMock(),
+                user_id="u1",
+                system_role="user",
+                spaces=["legal"],
+                cases=[RecallEvalCase(q="合规要求", needles=["合规"])],
                 top_k=5,
             )
-        assert result["needle_hit_rate"] >= 1.0
+        assert mock_search.await_count == 1
+        assert result.needle_hit_rate >= 1.0
+        assert result.cases[0]["hits"] == 1
 
 
 def test_tag_group_applies_only_when_lane_tags_overlap():

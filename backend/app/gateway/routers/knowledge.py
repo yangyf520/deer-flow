@@ -570,6 +570,7 @@ async def search(body: KnowledgeSearchRequest, request: Request) -> EvidencePack
             query=body.query,
             spaces=body.spaces,
             top_k=body.top_k,
+            similarity_cutoff=body.similarity_cutoff,
             knowledge_version=body.knowledge_version,
             scenario=body.scenario,
         )
@@ -591,4 +592,8 @@ async def eval_recall(body: RecallEvalRequest, request: Request) -> RecallEvalRe
             spaces=body.spaces,
             cases=body.cases,
             top_k=body.top_k,
+            scenario=body.scenario,
+            knowledge_version=body.knowledge_version,
+            similarity_cutoff=body.similarity_cutoff,
+            as_of_date=body.as_of_date,
         )
