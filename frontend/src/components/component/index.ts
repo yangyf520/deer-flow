@@ -2,6 +2,7 @@ export { CardAction, cardActionClass } from "./item";
 export {
   dotSeparatedMeta,
   formatItemListCountLabel,
+  itemListFlushClass,
   ItemList,
   ItemListPanel,
   ItemRow,

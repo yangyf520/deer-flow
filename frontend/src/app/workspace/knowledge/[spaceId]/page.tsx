@@ -40,6 +40,7 @@ import {
   InlineEmpty,
   ItemListInfiniteTail,
   ItemListPanel,
+  itemListFlushClass,
   ItemRowStatusBadge,
   Shell,
   ShellHeader,
@@ -737,7 +738,7 @@ export default function KnowledgeSpaceDocumentsPage() {
               </InlineEmpty>
             </div>
           ) : (
-            <ul className="divide-border divide-y">
+            <ul className={itemListFlushClass}>
               {docs.map((d) => {
                 const detail = ingestDetail(d, t.knowledge);
                 const ingestModeLabel = docIngestModeLabel(

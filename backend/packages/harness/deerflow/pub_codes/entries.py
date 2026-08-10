@@ -37,22 +37,38 @@ async def upsert_flat_entry(
     code: str,
     label: str,
     attrs: dict[str, Any] | None = None,
+    parent_code: str = "",
 ) -> PubCodeRow:
     did = (domain or "").strip().lower()
     entry_type = (type_key or "").strip()
     cid = (code or "").strip()
+    parent = (parent_code or "").strip()
     display = (label or "").strip() or cid
     if not did or not entry_type or not cid:
         raise HTTPException(status_code=422, detail="domain, type_key and code are required")
     if cid == CODE_CATEGORY:
         raise HTTPException(status_code=422, detail="invalid entry code")
 
+    if parent:
+        parent_row = (
+            await session.execute(
+                select(PubCodeRow).where(
+                    PubCodeRow.domain == did,
+                    PubCodeRow.type_key == entry_type,
+                    PubCodeRow.parent_code == "",
+                    PubCodeRow.code == parent,
+                )
+            )
+        ).scalar_one_or_none()
+        if parent_row is None or parent_row.code == CODE_CATEGORY:
+            raise HTTPException(status_code=404, detail="parent category not found")
+
     row = (
         await session.execute(
             select(PubCodeRow).where(
                 PubCodeRow.domain == did,
                 PubCodeRow.type_key == entry_type,
-                PubCodeRow.parent_code == "",
+                PubCodeRow.parent_code == parent,
                 PubCodeRow.code == cid,
             )
         )
@@ -76,7 +92,7 @@ async def upsert_flat_entry(
                     select(PubCodeRow.sort_order).where(
                         PubCodeRow.domain == did,
                         PubCodeRow.type_key == entry_type,
-                        PubCodeRow.parent_code == "",
+                        PubCodeRow.parent_code == parent,
                         PubCodeRow.code != CODE_CATEGORY,
                     )
                 )
@@ -91,7 +107,7 @@ async def upsert_flat_entry(
             type_key=entry_type,
             code=cid,
             label=display,
-            parent_code="",
+            parent_code=parent,
             attrs=next_attrs,
             sort_order=sort_order,
             enabled=True,
@@ -118,10 +134,12 @@ async def delete_flat_entry(
     domain: str,
     type_key: str,
     code: str,
+    parent_code: str = "",
 ) -> bool:
     did = (domain or "").strip().lower()
     entry_type = (type_key or "").strip()
     cid = (code or "").strip()
+    parent = (parent_code or "").strip()
     if not did or not entry_type or not cid:
         return False
 
@@ -130,13 +148,30 @@ async def delete_flat_entry(
             select(PubCodeRow).where(
                 PubCodeRow.domain == did,
                 PubCodeRow.type_key == entry_type,
-                PubCodeRow.parent_code == "",
+                PubCodeRow.parent_code == parent,
                 PubCodeRow.code == cid,
             )
         )
     ).scalar_one_or_none()
     if row is None or row.code == CODE_CATEGORY:
         return False
+
+    if not parent:
+        children = list(
+            (
+                await session.execute(
+                    select(PubCodeRow).where(
+                        PubCodeRow.domain == did,
+                        PubCodeRow.type_key == entry_type,
+                        PubCodeRow.parent_code == cid,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for child in children:
+            await session.delete(child)
 
     await session.delete(row)
     await session.commit()

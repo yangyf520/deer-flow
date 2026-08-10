@@ -86,6 +86,7 @@ async def list_code_table_domains(request: Request) -> CodeTableDomainsListRespo
             domain=str(row["domain"]),
             type_key=str(row.get("type_key") or ""),
             label=str(row.get("label") or ""),
+            parent_code=str(row.get("parent_code") or ""),
             entry_count=int(row["entry_count"]),
         )
         for row in summaries
@@ -102,26 +103,29 @@ async def create_code_table_domain(
     body: CreateCodeTableDomainRequest,
     request: Request,
 ) -> CodeTableDomainSummaryResponse:
-    """Register a user-defined code-table domain."""
+    """Register a user-defined code-table domain with an initial parent category."""
     _ = request
     domain = body.domain.strip().lower()
-    type_key = body.type_key.strip()
+    code = body.code.strip()
     if domain != body.domain.strip().lower() or not domain.replace("-", "").isalnum():
         raise HTTPException(status_code=422, detail="invalid domain")
-    if not type_key.replace("_", "").replace("-", "").isalnum():
-        raise HTTPException(status_code=422, detail="invalid type_key")
+    if not code.replace("_", "").replace("-", "").isalnum():
+        raise HTTPException(status_code=422, detail="invalid code")
     factory = get_session_factory()
     async with factory() as session:
         row = await register_domain(
             session,
             domain=domain,
-            type_key=type_key,
+            code=code,
             label=body.label.strip(),
+            type_key=body.type_key.strip(),
+            attrs=body.attrs,
         )
     return CodeTableDomainSummaryResponse(
         domain=row.domain,
         type_key=row.type_key,
         label=row.label or row.code,
+        parent_code=row.code,
         entry_count=0,
     )
 
@@ -150,7 +154,7 @@ async def update_code_table_domain(
         summaries = await list_domain_summaries(session)
     saved_type_key = row.type_key
     summary = next(
-        (item for item in summaries if str(item["domain"]) == did and str(item["type_key"]) == saved_type_key),
+        (item for item in summaries if str(item["domain"]) == did),
         None,
     )
     return CodeTableDomainSummaryResponse(
@@ -202,6 +206,7 @@ async def create_code_table_entry(
 ) -> PubCodeEntryResponse:
     did = domain.strip().lower()
     _require_domain_write(request, did)
+    parent_code = body.parent_code.strip()
     factory = get_session_factory()
     async with factory() as session:
         existing = (
@@ -209,7 +214,7 @@ async def create_code_table_entry(
                 select(PubCodeRow).where(
                     PubCodeRow.domain == did,
                     PubCodeRow.type_key == body.type_key.strip(),
-                    PubCodeRow.parent_code == "",
+                    PubCodeRow.parent_code == parent_code,
                     PubCodeRow.code == body.code.strip(),
                 )
             )
@@ -223,6 +228,7 @@ async def create_code_table_entry(
             code=body.code.strip(),
             label=body.label.strip(),
             attrs=body.attrs,
+            parent_code=parent_code,
         )
     return _entry_response(row)
 
@@ -237,6 +243,7 @@ async def update_code_table_entry(
 ) -> PubCodeEntryResponse:
     did = domain.strip().lower()
     _require_domain_write(request, did)
+    parent_code = body.parent_code.strip()
     factory = get_session_factory()
     async with factory() as session:
         row = await upsert_flat_entry(
@@ -246,6 +253,7 @@ async def update_code_table_entry(
             code=code.strip(),
             label=body.label.strip(),
             attrs=body.attrs,
+            parent_code=parent_code,
         )
     return _entry_response(row)
 
@@ -257,6 +265,7 @@ async def delete_code_table_entry(
     code: str,
     request: Request,
     type_key: str = Query(..., min_length=1),
+    parent_code: str = Query(""),
 ) -> None:
     did = domain.strip().lower()
     _require_domain_write(request, did)
@@ -267,6 +276,7 @@ async def delete_code_table_entry(
             domain=did,
             type_key=type_key.strip(),
             code=code.strip(),
+            parent_code=parent_code.strip(),
         )
     if not deleted:
         raise HTTPException(status_code=404, detail="entry not found")

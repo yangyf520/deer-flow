@@ -11,7 +11,6 @@ import {
   type RefObject,
 } from "react";
 
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import { PanelEmpty } from "./empty";
@@ -21,6 +20,10 @@ import {
   workspaceIndexListPanelClass,
   workspacePageInsetXClass,
 } from "./styles";
+
+/** Row dividers between and after every list item (including the last). */
+export const itemListFlushClass =
+  "flex flex-col [&>*]:border-b [&>*]:border-border/50";
 
 export function dotSeparatedMeta(items: ReactNode[]): ReactNode[] {
   const nodes = items.filter(Boolean);
@@ -539,7 +542,7 @@ export function ItemList({
     <div
       className={cn(
         variant === "flush"
-          ? "[&>*]:border-border/50 flex flex-col [&>*]:border-b"
+          ? itemListFlushClass
           : "divide-border/60 flex flex-col divide-y px-1 py-1 sm:px-2",
         className,
       )}
@@ -710,51 +713,6 @@ export function ItemListInfiniteTail({
         data-testid={sentinelTestId}
       />
     </>
-  );
-}
-
-function ItemListLoadMoreFooter({
-  hasNextPage,
-  isFetchingNextPage,
-  onLoadMore,
-  loadMoreLabel,
-  loadMoreSearchLabel,
-  loadingLabel,
-  isSearching = false,
-  className,
-  loadMoreTestId,
-}: {
-  hasNextPage: boolean;
-  isFetchingNextPage: boolean;
-  onLoadMore: () => void | Promise<unknown>;
-  loadMoreLabel: string;
-  loadMoreSearchLabel?: string;
-  loadingLabel: string;
-  isSearching?: boolean;
-  className?: string;
-  loadMoreTestId?: string;
-}) {
-  if (!hasNextPage) {
-    return null;
-  }
-  const label = isFetchingNextPage
-    ? loadingLabel
-    : isSearching && loadMoreSearchLabel
-      ? loadMoreSearchLabel
-      : loadMoreLabel;
-
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      className={cn("w-full rounded-none border-0 border-t", className)}
-      disabled={isFetchingNextPage}
-      onClick={() => void onLoadMore()}
-      data-testid={loadMoreTestId}
-    >
-      {label}
-    </Button>
   );
 }
 

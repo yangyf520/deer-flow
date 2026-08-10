@@ -1,5 +1,4 @@
 import type { CodeTableTranslations } from "@/core/i18n/locales/code-table";
-import type { KnowledgeIndustryTag } from "@/core/knowledge/api";
 
 export type CodeTableEntryRecord = {
   code: string;
@@ -41,15 +40,7 @@ export function readStringListAttr(
   return raw.map((item) => String(item).trim()).filter(Boolean);
 }
 
-function readStringAttr(
-  attrs: Record<string, unknown> | undefined,
-  key: string,
-): string {
-  const raw = attrs?.[key];
-  return typeof raw === "string" ? raw.trim() : "";
-}
-
-export function industryTagAttrFields(
+export function codeTableEntryAttrFields(
   ct: CodeTableTranslations,
 ): CodeTableAttrFieldSpec[] {
   return [
@@ -77,21 +68,6 @@ export function industryTagAttrFields(
   ];
 }
 
-export function industryTagToEntry(
-  tag: KnowledgeIndustryTag,
-): CodeTableEntryRecord {
-  return {
-    code: tag.id,
-    label: tag.label?.trim() ?? tag.id,
-    attrs: {
-      keywords: tag.keywords ?? [],
-      department: tag.department ?? [],
-      aliases: tag.aliases ?? [],
-      space_id: tag.space_id ?? "",
-    },
-  };
-}
-
 export function flatEntryToEntry(entry: {
   code: string;
   label: string;
@@ -101,36 +77,6 @@ export function flatEntryToEntry(entry: {
     code: entry.code,
     label: entry.label?.trim() ?? entry.code,
     attrs: entry.attrs ?? {},
-  };
-}
-
-export function flatEntryToIndustryTag(entry: {
-  code: string;
-  label: string;
-  attrs?: Record<string, unknown>;
-}): KnowledgeIndustryTag {
-  return {
-    id: entry.code,
-    label: entry.label?.trim() ?? entry.code,
-    keywords: readStringListAttr(entry.attrs, "keywords"),
-    department: readStringListAttr(entry.attrs, "department"),
-    aliases: readStringListAttr(entry.attrs, "aliases"),
-    space_id: readStringAttr(entry.attrs, "space_id"),
-  };
-}
-
-export function formValuesFromEntry(
-  entry: CodeTableEntryRecord,
-  attrFields: CodeTableAttrFieldSpec[],
-): Omit<CodeTableEntryFormValues, "code"> & { code: string } {
-  const attrs: Record<string, string[]> = {};
-  for (const field of attrFields) {
-    attrs[field.attrKey] = readStringListAttr(entry.attrs, field.attrKey);
-  }
-  return {
-    code: entry.code,
-    label: entry.label,
-    attrs,
   };
 }
 

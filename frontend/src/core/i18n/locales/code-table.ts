@@ -2,7 +2,6 @@ export type CodeTableTranslations = {
   title: string;
   description: string;
   listTitle: string;
-  entriesListTitle: string;
   empty: string;
   searchPlaceholder: string;
   searchEmpty: string;
@@ -10,11 +9,9 @@ export type CodeTableTranslations = {
   entriesSearchEmpty: string;
   countTotal: (count: number) => string;
   countFiltered: (shown: number, total: number) => string;
-  openDomain: string;
   entryCount: (count: number) => string;
   deleteDomainConfirm: (label: string) => string;
   domainDeleted: (count: number) => string;
-  createDomain: string;
   editDomain: string;
   domainCreated: string;
   domainUpdated: string;
@@ -51,7 +48,6 @@ export type CodeTableTranslations = {
   domains: {
     knowledge: {
       label: string;
-      description: string;
     };
   };
 };
@@ -61,7 +57,6 @@ export const codeTableEnUS: CodeTableTranslations = {
   description:
     "Manage shared code lists by domain for tags, categories, and lookups.",
   listTitle: "Code table list",
-  entriesListTitle: "Code table list",
   empty: "No code-table domains are registered yet.",
   searchPlaceholder: "Search domains…",
   searchEmpty: "No matching domains.",
@@ -69,7 +64,6 @@ export const codeTableEnUS: CodeTableTranslations = {
   entriesSearchEmpty: "No matching entries.",
   countTotal: (count) => `${count} entries`,
   countFiltered: (shown, total) => `${shown} / ${total}`,
-  openDomain: "Manage",
   entryCount: (count) => `${count} entries`,
   deleteDomainConfirm: (label) =>
     `Delete all entries in “${label}”? This removes the entire code-table category and cannot be undone.`,
@@ -77,7 +71,6 @@ export const codeTableEnUS: CodeTableTranslations = {
     count === 1
       ? "Deleted 1 code-table entry"
       : `Deleted ${count} code-table entries`,
-  createDomain: "New domain",
   editDomain: "Edit domain",
   domainCreated: "Domain created",
   domainUpdated: "Domain updated",
@@ -127,8 +120,6 @@ export const codeTableEnUS: CodeTableTranslations = {
   domains: {
     knowledge: {
       label: "Knowledge tags",
-      description:
-        "Document kinds, tags, and tag groups for knowledge import and retrieval.",
     },
   },
 };
@@ -137,7 +128,6 @@ export const codeTableZhCN: CodeTableTranslations = {
   title: "码表管理",
   description: "按业务域维护共用码表，供标签、分类与下拉选项使用",
   listTitle: "码表列表",
-  entriesListTitle: "码表列表",
   empty: "暂无已注册的码表域。",
   searchPlaceholder: "检索业务域…",
   searchEmpty: "没有匹配的业务域。",
@@ -145,13 +135,11 @@ export const codeTableZhCN: CodeTableTranslations = {
   entriesSearchEmpty: "没有匹配的码表项。",
   countTotal: (count) => `${count} 条`,
   countFiltered: (shown, total) => `${shown} / ${total}`,
-  openDomain: "管理",
   entryCount: (count) => `${count} 条`,
   deleteDomainConfirm: (label) =>
     `确定删除「${label}」下的全部码表？将清空整类码表且不可恢复。`,
   domainDeleted: (count) =>
     count === 1 ? "已删除 1 条码表" : `已删除 ${count} 条码表`,
-  createDomain: "新建分类",
   editDomain: "编辑分类",
   domainCreated: "分类已创建",
   domainUpdated: "分类已更新",
@@ -199,8 +187,7 @@ export const codeTableZhCN: CodeTableTranslations = {
   },
   domains: {
     knowledge: {
-      label: "知识库标签",
-      description: "行业标签与知识库打标码表，用于分类与检索过滤。",
+      label: "知识库场景码表",
     },
   },
 };

@@ -11,6 +11,7 @@ import {
   HeaderCreateButton,
   InlineEmpty,
   ItemListPanel,
+  itemListFlushClass,
   ListPanelToolbar,
   ListSearchField,
   PanelEmpty,
@@ -19,30 +20,30 @@ import {
 } from "@/components/component";
 import { headerPairedActionButtonClass } from "@/components/component/styles";
 import {
-  CodeTableEntryCreateDialog,
+  CodeTableCreateEntryDialog,
   CodeTableEntryEditDialog,
 } from "@/components/workspace/code-table/entry-dialog";
 import {
-  createCodeTableEntry,
+  DEFAULT_CODE_TABLE_TYPE_KEY,
   deleteCodeTableEntry,
   listCodeTableDomains,
   loadCodeTableBundle,
   normalizeCodeTableFlatBundle,
   updateCodeTableEntry,
+  codeTableDomainDisplayName,
+  isCodeTableUserEntry,
+  primaryCodeTableDomainCategory,
   type CodeTableFlatEntry,
 } from "@/core/code-table/api";
 import {
   attrsFromFormValues,
+  codeTableEntryAttrFields,
   flatEntryToEntry,
-  flatEntryToIndustryTag,
-  industryTagAttrFields,
-  industryTagToEntry,
+  readStringListAttr,
   type CodeTableEntryFormValues,
   type CodeTableEntryRecord,
 } from "@/core/code-table/entry-schema";
 import { useI18n } from "@/core/i18n/hooks";
-
-const INDUSTRY_TYPE_KEY = "industry_tag";
 
 type EntryDisplayRow = {
   key: string;
@@ -57,6 +58,15 @@ function entryMatchesQuery(row: EntryDisplayRow, q: string): boolean {
   return row.searchText.toLowerCase().includes(q);
 }
 
+function isFlatDomainList(
+  items: readonly { parent_code?: string }[],
+  summaryParentCode: string,
+): boolean {
+  if (summaryParentCode) return false;
+  return !items.some((entry) => (entry.parent_code ?? "").trim());
+}
+
+/** Child entries for a domain; flat domains list all rows, others list children only. */
 export function FlatCodeTablePanel({
   domain,
   backHref,
@@ -67,13 +77,14 @@ export function FlatCodeTablePanel({
   const { t, locale } = useI18n();
   const ct = t.codeTable;
   const [typeKey, setTypeKey] = useState("");
-  const [categoryLabel, setCategoryLabel] = useState("");
+  const [parentCode, setParentCode] = useState("");
+  const [flatList, setFlatList] = useState(true);
+  const [title, setTitle] = useState("");
   const [entries, setEntries] = useState<CodeTableFlatEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  const [createBusy, setCreateBusy] = useState(false);
   const [editing, setEditing] = useState<CodeTableEntryRecord | null>(null);
   const [editBusy, setEditBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -81,10 +92,7 @@ export function FlatCodeTablePanel({
     null,
   );
 
-  const entryAttrFields = useMemo(
-    () => (typeKey === INDUSTRY_TYPE_KEY ? industryTagAttrFields(ct) : []),
-    [ct, typeKey],
-  );
+  const entryAttrFields = useMemo(() => codeTableEntryAttrFields(ct), [ct]);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -94,60 +102,80 @@ export function FlatCodeTablePanel({
         listCodeTableDomains(),
         loadCodeTableBundle(domain),
       ]);
-      const category = domainsRes.items.find((item) => item.domain === domain);
-      const resolvedTypeKey = category?.type_key ?? "";
-      setTypeKey(resolvedTypeKey);
-      setCategoryLabel(category?.label?.trim() ?? domain);
+      const category = primaryCodeTableDomainCategory(domainsRes.items, domain);
       const flat = normalizeCodeTableFlatBundle(
         domain,
         bundle,
-        resolvedTypeKey,
+        category?.type_key ?? DEFAULT_CODE_TABLE_TYPE_KEY,
+      );
+      const items = flat.items.filter(isCodeTableUserEntry);
+      const rootEntries = items.filter(
+        (entry) => !(entry.parent_code ?? "").trim(),
+      );
+      const categoryTypeKey = category?.type_key?.trim();
+      const rootTypeKey = rootEntries[0]?.type_key?.trim();
+      const resolvedTypeKey =
+        [categoryTypeKey, rootTypeKey].find((key) => Boolean(key?.length)) ??
+        DEFAULT_CODE_TABLE_TYPE_KEY;
+      const summaryParentCode = category?.parent_code?.trim() ?? "";
+      const isFlatList = isFlatDomainList(items, summaryParentCode);
+      const resolvedParentCode = isFlatList
+        ? ""
+        : summaryParentCode.length > 0
+          ? summaryParentCode
+          : (rootEntries[0]?.code ?? "");
+      setTypeKey(resolvedTypeKey);
+      setParentCode(resolvedParentCode);
+      setFlatList(isFlatList);
+      setTitle(
+        category
+          ? codeTableDomainDisplayName(category, ct.domains.knowledge.label)
+          : domain,
       );
       setEntries(
-        flat.items.filter(
-          (item) => !resolvedTypeKey || item.type_key === resolvedTypeKey,
-        ),
+        isFlatList
+          ? items
+          : resolvedParentCode
+            ? items.filter(
+                (entry) =>
+                  (entry.parent_code ?? "").trim() === resolvedParentCode,
+              )
+            : rootEntries,
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [domain]);
+  }, [ct.domains.knowledge.label, domain]);
 
   useEffect(() => {
     void reload();
   }, [reload, locale]);
 
   const displayRows = useMemo((): EntryDisplayRow[] => {
-    if (typeKey === INDUSTRY_TYPE_KEY) {
-      return entries.map((entry) => {
-        const tag = flatEntryToIndustryTag(entry);
-        const label = tag.label?.trim() ?? tag.id;
-        const keywords = tag.keywords ?? [];
-        const department = tag.department ?? [];
-        const subtitle = keywords.length > 0 ? keywords.join(" · ") : undefined;
-        return {
-          key: tag.id,
-          label,
-          code: tag.id,
-          subtitle,
-          searchText: [label, tag.id, ...keywords, ...department].join(" "),
-          record: industryTagToEntry(tag),
-        };
-      });
-    }
     return entries.map((entry) => {
       const record = flatEntryToEntry(entry);
+      const keywords = readStringListAttr(record.attrs, "keywords");
+      const department = readStringListAttr(record.attrs, "department");
+      const aliases = readStringListAttr(record.attrs, "aliases");
+      const subtitle = keywords.length > 0 ? keywords.join(" · ") : undefined;
       return {
         key: record.code,
         label: record.label,
         code: record.code,
-        searchText: `${record.label} ${record.code}`,
+        subtitle,
+        searchText: [
+          record.label,
+          record.code,
+          ...keywords,
+          ...department,
+          ...aliases,
+        ].join(" "),
         record,
       };
     });
-  }, [entries, typeKey]);
+  }, [entries]);
 
   const q = query.trim().toLowerCase();
   const filteredRows = useMemo(() => {
@@ -163,28 +191,11 @@ export function FlatCodeTablePanel({
         : ct.entryCount(entries.length)
       : undefined;
 
-  const headerSuffix = typeKey.length > 0 ? `${domain} · ${typeKey}` : domain;
+  const createTypeKey =
+    typeKey.length > 0 ? typeKey : DEFAULT_CODE_TABLE_TYPE_KEY;
 
-  async function onCreateEntry(input: CodeTableEntryFormValues) {
-    if (!typeKey) return;
-    setCreateBusy(true);
-    setError(null);
-    try {
-      await createCodeTableEntry(domain, {
-        type_key: typeKey,
-        code: input.code,
-        label: input.label,
-        attrs: attrsFromFormValues(input, entryAttrFields),
-      });
-      setCreateOpen(false);
-      toast.success(ct.entryCreated);
-      await reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setCreateBusy(false);
-    }
-  }
+  const canCreate =
+    !loading && Boolean(createTypeKey) && (flatList || parentCode.length > 0);
 
   async function onSaveEntry(input: Omit<CodeTableEntryFormValues, "code">) {
     if (!editing || !typeKey) return;
@@ -194,6 +205,7 @@ export function FlatCodeTablePanel({
       await updateCodeTableEntry(domain, editing.code, {
         type_key: typeKey,
         label: input.label,
+        parent_code: flatList ? "" : parentCode,
         attrs: attrsFromFormValues(
           { code: editing.code, label: input.label, attrs: input.attrs },
           entryAttrFields,
@@ -214,7 +226,12 @@ export function FlatCodeTablePanel({
     setDeleteBusy(true);
     setError(null);
     try {
-      await deleteCodeTableEntry(domain, code, typeKey);
+      await deleteCodeTableEntry(
+        domain,
+        code,
+        typeKey,
+        flatList ? "" : parentCode,
+      );
       if (editing?.code === code) setEditing(null);
       setEntryCodeToDelete(null);
       toast.success(ct.entryDeleted);
@@ -234,14 +251,14 @@ export function FlatCodeTablePanel({
         header={
           <ShellHeader
             backHref={backHref}
-            title={categoryLabel || domain}
+            title={title}
             description={ct.description}
-            descriptionSuffix={headerSuffix}
+            descriptionSuffix={domain}
             actions={
               <HeaderCreateButton
                 className={headerPairedActionButtonClass}
                 onClick={() => setCreateOpen(true)}
-                disabled={!typeKey || loading}
+                disabled={!canCreate}
               >
                 {ct.createEntry}
               </HeaderCreateButton>
@@ -252,7 +269,7 @@ export function FlatCodeTablePanel({
         {error ? <AlertError>{error}</AlertError> : null}
 
         <ItemListPanel
-          title={ct.entriesListTitle}
+          title={ct.listTitle}
           countLabel={countLabel}
           toolbar={
             entries.length > 0 ? (
@@ -275,7 +292,7 @@ export function FlatCodeTablePanel({
                 type="button"
                 className="text-primary mt-3 text-sm font-medium hover:underline"
                 onClick={() => setCreateOpen(true)}
-                disabled={!typeKey}
+                disabled={!canCreate}
               >
                 {ct.createEntry}
               </button>
@@ -283,7 +300,7 @@ export function FlatCodeTablePanel({
           ) : filteredRows.length === 0 ? (
             <InlineEmpty className="p-3">{ct.entriesSearchEmpty}</InlineEmpty>
           ) : (
-            <ul className="divide-border divide-y">
+            <ul className={itemListFlushClass}>
               {filteredRows.map((row) => (
                 <li
                   key={row.key}
@@ -325,12 +342,20 @@ export function FlatCodeTablePanel({
         </ItemListPanel>
       </Shell>
 
-      <CodeTableEntryCreateDialog
+      <CodeTableCreateEntryDialog
         open={createOpen}
-        onOpenChange={setCreateOpen}
-        busy={createBusy}
-        attrFields={entryAttrFields}
-        onConfirm={onCreateEntry}
+        onOpenChange={(open) => {
+          setCreateOpen(open);
+          if (open) setError(null);
+        }}
+        onError={(e) => setError(e.message)}
+        scope={{
+          domain,
+          typeKey: createTypeKey,
+          parentCode: flatList ? "" : parentCode,
+          attrFields: entryAttrFields,
+          onCreated: () => reload(),
+        }}
       />
 
       <CodeTableEntryEditDialog

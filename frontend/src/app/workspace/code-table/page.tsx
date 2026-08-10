@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  BookOpenIcon,
-  SettingsIcon,
-  Trash2Icon,
-  type LucideIcon,
-} from "lucide-react";
+import { BookOpenIcon, SettingsIcon, Trash2Icon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -17,6 +12,7 @@ import {
   HeaderCreateButton,
   InlineEmpty,
   ItemListPanel,
+  itemListFlushClass,
   ListPanelToolbar,
   ListSearchField,
   PanelEmpty,
@@ -24,17 +20,17 @@ import {
   ShellHeader,
 } from "@/components/component";
 import { headerPairedActionButtonClass } from "@/components/component/styles";
-import {
-  CodeTableDomainCreateDialog,
-  CodeTableDomainEditDialog,
-} from "@/components/workspace/code-table/domain-dialog";
+import { CodeTableDomainEditDialog } from "@/components/workspace/code-table/domain-dialog";
+import { CodeTableCreateEntryDialog } from "@/components/workspace/code-table/entry-dialog";
 import {
   KNOWLEDGE_CODE_TABLE_DOMAIN,
   KNOWLEDGE_DEFAULT_TYPE_KEY,
-  createCodeTableDomain,
   deleteCodeTableDomain,
   listCodeTableDomains,
   updateCodeTableDomain,
+  codeTableDomainDisplayName,
+  groupCodeTableDomainSummaries,
+  primaryCodeTableDomainCategory,
   type CodeTableDomainSummary,
 } from "@/core/code-table/api";
 import { codeTableDomainHref } from "@/core/code-table/routes";
@@ -48,14 +44,6 @@ const DEFAULT_DOMAINS: CodeTableDomainSummary[] = [
   },
 ];
 
-const DOMAIN_ICONS: Record<string, LucideIcon> = {
-  [KNOWLEDGE_CODE_TABLE_DOMAIN]: BookOpenIcon,
-};
-
-function domainRowKey(item: CodeTableDomainSummary): string {
-  return `${item.domain}:${item.type_key}`;
-}
-
 export default function CodeTablePage() {
   const { t } = useI18n();
   const ct = t.codeTable;
@@ -65,7 +53,6 @@ export default function CodeTablePage() {
   const [error, setError] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
-  const [createBusy, setCreateBusy] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
   const [domainToEdit, setDomainToEdit] =
@@ -98,22 +85,24 @@ export default function CodeTablePage() {
 
   const rows = useMemo(
     () =>
-      items.map((item) => ({
+      groupCodeTableDomainSummaries(items).map((item) => ({
         ...item,
         href: codeTableDomainHref(item.domain),
-        Icon: DOMAIN_ICONS[item.domain] ?? BookOpenIcon,
+        Icon: BookOpenIcon,
+        title: codeTableDomainDisplayName(item, ct.domains.knowledge.label),
+        category: primaryCodeTableDomainCategory(items, item.domain) ?? item,
       })),
-    [items],
+    [ct.domains.knowledge.label, items],
   );
 
   const q = query.trim().toLowerCase();
   const filteredRows = useMemo(() => {
     if (!q) return rows;
-    return rows.filter(({ domain, type_key, label }) => {
+    return rows.filter(({ domain, title, label }) => {
       const displayLabel = label?.trim().toLowerCase() ?? "";
       return (
         domain.toLowerCase().includes(q) ||
-        type_key.toLowerCase().includes(q) ||
+        title.toLowerCase().includes(q) ||
         displayLabel.includes(q)
       );
     });
@@ -126,26 +115,6 @@ export default function CodeTablePage() {
     if (q) return ct.countFiltered(filteredRows.length, rows.length);
     return ct.countTotal(rows.length);
   }, [ct, filteredRows.length, q, rows.length]);
-
-  async function onCreateDomain(input: {
-    domain: string;
-    type_key: string;
-    label: string;
-  }) {
-    setCreateBusy(true);
-    setError(null);
-    try {
-      const created = await createCodeTableDomain(input);
-      setCreateOpen(false);
-      toast.success(ct.domainCreated);
-      await reload();
-      router.push(codeTableDomainHref(created.domain));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setCreateBusy(false);
-    }
-  }
 
   async function onEditDomain(input: {
     type_key: string;
@@ -185,7 +154,7 @@ export default function CodeTablePage() {
   }
 
   const deleteLabel = domainToDelete
-    ? `${domainToDelete.domain}/${domainToDelete.type_key}`
+    ? codeTableDomainDisplayName(domainToDelete, ct.domains.knowledge.label)
     : "";
 
   return (
@@ -201,7 +170,7 @@ export default function CodeTablePage() {
                 className={headerPairedActionButtonClass}
                 onClick={() => setCreateOpen(true)}
               >
-                {ct.createDomain}
+                {ct.createEntry}
               </HeaderCreateButton>
             }
           />
@@ -236,17 +205,17 @@ export default function CodeTablePage() {
                 className="text-primary mt-3 text-sm font-medium hover:underline"
                 onClick={() => setCreateOpen(true)}
               >
-                {ct.createDomain}
+                {ct.createEntry}
               </button>
             </PanelEmpty>
           ) : filteredRows.length === 0 ? (
             <InlineEmpty className="p-3">{ct.searchEmpty}</InlineEmpty>
           ) : (
-            <ul className="divide-border divide-y">
+            <ul className={itemListFlushClass}>
               {filteredRows.map(
-                ({ domain, type_key, entry_count, href, Icon }) => (
+                ({ domain, entry_count, href, Icon, title, category }) => (
                   <li
-                    key={domainRowKey({ domain, type_key, entry_count })}
+                    key={domain}
                     className="hover:bg-muted/40 flex min-w-0 items-center gap-2 px-4 py-2 transition-colors"
                   >
                     <Link
@@ -255,11 +224,8 @@ export default function CodeTablePage() {
                     >
                       <Icon className="text-muted-foreground size-3.5 shrink-0" />
                       <div className="min-w-0 flex-1">
-                        <div className="text-foreground truncate font-mono text-sm leading-snug font-medium">
-                          {domain}
-                        </div>
-                        <div className="text-muted-foreground truncate font-mono text-xs">
-                          {type_key}
+                        <div className="text-foreground truncate text-sm leading-snug font-medium">
+                          {title}
                         </div>
                       </div>
                       <span className="text-muted-foreground shrink-0 text-xs">
@@ -271,7 +237,7 @@ export default function CodeTablePage() {
                         icon={SettingsIcon}
                         label={t.common.edit}
                         onClick={() => {
-                          setDomainToEdit({ domain, type_key, entry_count });
+                          setDomainToEdit(category);
                           setEditOpen(true);
                         }}
                         disabled={deleteBusy}
@@ -279,9 +245,7 @@ export default function CodeTablePage() {
                       <CardAction
                         icon={Trash2Icon}
                         label={t.common.delete}
-                        onClick={() =>
-                          setDomainToDelete({ domain, type_key, entry_count })
-                        }
+                        onClick={() => setDomainToDelete(category)}
                         disabled={
                           deleteBusy || domain === KNOWLEDGE_CODE_TABLE_DOMAIN
                         }
@@ -295,11 +259,16 @@ export default function CodeTablePage() {
         </ItemListPanel>
       </Shell>
 
-      <CodeTableDomainCreateDialog
+      <CodeTableCreateEntryDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
-        busy={createBusy}
-        onConfirm={onCreateDomain}
+        onError={(e) => setError(e.message)}
+        scope={{
+          onCreated: async (createdDomain) => {
+            await reload();
+            router.push(codeTableDomainHref(createdDomain));
+          },
+        }}
       />
 
       <CodeTableDomainEditDialog

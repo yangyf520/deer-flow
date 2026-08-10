@@ -5,7 +5,12 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { PageShell } from "@/app/workspace/knowledge/ui";
-import { AlertError, Header, InlineEmpty } from "@/components/component";
+import {
+  AlertError,
+  Header,
+  InlineEmpty,
+  itemListFlushClass,
+} from "@/components/component";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,6 +41,7 @@ import {
   type SpaceRoleValue,
   upsertGrant,
 } from "@/core/knowledge";
+import { cn } from "@/lib/utils";
 
 export default function KnowledgeGrantsPage() {
   const { t } = useI18n();
@@ -170,7 +176,7 @@ export default function KnowledgeGrantsPage() {
         {grants.length === 0 ? (
           <InlineEmpty className="p-6">{t.knowledge.emptyGrants}</InlineEmpty>
         ) : (
-          <ul className="divide-border bg-card divide-y rounded-xl border">
+          <ul className={cn(itemListFlushClass, "bg-card rounded-xl border")}>
             {grants.map((grant) => (
               <li key={grant.id} className="flex items-center gap-3 px-4 py-3">
                 <div className="min-w-0 flex-1">

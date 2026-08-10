@@ -1503,20 +1503,41 @@ async def test_industry_tag_roundtrip_via_pub_codes(pub_codes_session):
 
 
 @pytest.mark.anyio
+async def test_register_code_table_domain_rejects_reserved_code(pub_codes_session):
+    from fastapi import HTTPException
+
+    from deerflow.pub_codes.domains import register_domain
+
+    with pytest.raises(HTTPException, match="invalid code"):
+        await register_domain(
+            pub_codes_session,
+            domain="legal",
+            code="_category",
+            label="bad",
+        )
+
+
+@pytest.mark.anyio
 async def test_register_code_table_domain(pub_codes_session):
     from deerflow.pub_codes.domains import list_domain_summaries, register_domain
 
-    row = await register_domain(pub_codes_session, domain="legal", type_key="industry_tag", label="法务码表")
+    row = await register_domain(
+        pub_codes_session,
+        domain="legal",
+        code="industry_tag",
+        label="法务码表",
+    )
     assert row.domain == "legal"
-    assert row.type_key == "industry_tag"
-    assert row.code == "_category"
+    assert row.type_key == "entry"
+    assert row.code == "industry_tag"
     assert row.label == "法务码表"
-    assert row.attrs == {}
+    assert row.parent_code == ""
 
     summaries = await list_domain_summaries(pub_codes_session)
     legal = next(item for item in summaries if item["domain"] == "legal")
     assert legal["label"] == "法务码表"
-    assert legal["type_key"] == "industry_tag"
+    assert legal["type_key"] == "entry"
+    assert legal["parent_code"] == "industry_tag"
     assert legal["entry_count"] == 0
 
 

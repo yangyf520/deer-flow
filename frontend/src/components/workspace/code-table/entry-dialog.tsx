@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 import {
   ConfirmDialog,
@@ -12,7 +13,13 @@ import {
   dialogSaveFooterProps,
 } from "@/components/component";
 import {
+  createCodeTableDomain,
+  createCodeTableEntry,
+  DEFAULT_CODE_TABLE_TYPE_KEY,
+} from "@/core/code-table/api";
+import {
   attrsFromFormValues,
+  codeTableEntryAttrFields,
   formatListField,
   parseListField,
   readStringListAttr,
@@ -65,6 +72,7 @@ function CodeTableEntryFormFields({
   codeEditable,
   disabled,
   autoFocusLabel,
+  domainField,
 }: {
   copy: EntryDialogCopy;
   code: string;
@@ -77,6 +85,14 @@ function CodeTableEntryFormFields({
   codeEditable: boolean;
   disabled?: boolean;
   autoFocusLabel?: boolean;
+  domainField?: {
+    label: string;
+    placeholder?: string;
+    hint?: string;
+    value: string;
+    onChange: (value: string) => void;
+    readOnly?: boolean;
+  };
 }) {
   const codePlaceholder = codeEditable
     ? (copy.entryCodeHint ?? copy.entryCodePlaceholder)
@@ -86,6 +102,22 @@ function CodeTableEntryFormFields({
     <>
       <DialogFormSection title={copy.sectionBasic}>
         <DialogFieldGrid>
+          {domainField ? (
+            <DialogInputField
+              label={domainField.label}
+              value={domainField.value}
+              onChange={
+                domainField.readOnly ? () => undefined : domainField.onChange
+              }
+              placeholder={domainField.placeholder}
+              hint={domainField.hint}
+              disabled={Boolean(disabled) || domainField.readOnly}
+              autoCapitalize="none"
+              autoCorrect="off"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          ) : null}
           <DialogInputField
             label={copy.entryCode}
             value={code}
@@ -156,29 +188,28 @@ interface CodeTableEntryCreateDialogProps {
   busy: boolean;
   title?: string;
   attrFields?: CodeTableAttrFieldSpec[];
-  codePlaceholder?: string;
-  labelPlaceholder?: string;
+  domainField?: {
+    label: string;
+    placeholder?: string;
+    hint?: string;
+    value: string;
+    onChange: (value: string) => void;
+    readOnly?: boolean;
+  };
   onConfirm: (input: CodeTableEntryFormValues) => void | Promise<void>;
 }
 
-export function CodeTableEntryCreateDialog({
+function CodeTableEntryCreateDialog({
   open,
   onOpenChange,
   busy,
   title,
   attrFields = EMPTY_ATTR_FIELDS,
-  codePlaceholder,
-  labelPlaceholder,
+  domainField,
   onConfirm,
 }: CodeTableEntryCreateDialogProps) {
   const { t } = useI18n();
   const copy = useEntryDialogCopy();
-  const formCopy = {
-    ...copy,
-    entryCodePlaceholder: codePlaceholder ?? copy.entryCodePlaceholder,
-    entryCodeHint: copy.entryCodeHint,
-    entryLabelPlaceholder: labelPlaceholder ?? copy.entryLabelPlaceholder,
-  };
   const [code, setCode] = useState("");
   const [label, setLabel] = useState("");
   const [attrTexts, setAttrTexts] = useState<Record<string, string>>({});
@@ -192,7 +223,10 @@ export function CodeTableEntryCreateDialog({
     setAttrTexts(next);
   }, [attrFields, open]);
 
-  const canSave = code.trim().length > 0 && label.trim().length > 0;
+  const canSave =
+    code.trim().length > 0 &&
+    label.trim().length > 0 &&
+    (!domainField || domainField.value.trim().length > 0);
 
   return (
     <FormDialog
@@ -208,7 +242,7 @@ export function CodeTableEntryCreateDialog({
       }}
     >
       <CodeTableEntryFormFields
-        copy={formCopy}
+        copy={copy}
         code={code}
         setCode={setCode}
         label={label}
@@ -218,6 +252,7 @@ export function CodeTableEntryCreateDialog({
         setAttrText={(key, value) =>
           setAttrTexts((prev) => ({ ...prev, [key]: value }))
         }
+        domainField={domainField}
         codeEditable
         disabled={busy}
       />
@@ -326,5 +361,93 @@ export function CodeTableEntryEditDialog({
         onCancel={() => setDeleteOpen(false)}
       />
     </>
+  );
+}
+
+/** Unified create scope: root omits `domain`; detail passes a read-only domain. */
+export type CodeTableCreateEntryScope = {
+  domain?: string;
+  typeKey?: string;
+  parentCode?: string;
+  attrFields?: CodeTableAttrFieldSpec[];
+  onCreated?: (domain: string) => void | Promise<void>;
+};
+
+export function CodeTableCreateEntryDialog({
+  open,
+  onOpenChange,
+  scope,
+  onError,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  scope: CodeTableCreateEntryScope;
+  onError?: (error: Error) => void;
+}) {
+  const { t } = useI18n();
+  const ct = t.codeTable;
+  const [busy, setBusy] = useState(false);
+  const [domainDraft, setDomainDraft] = useState("");
+
+  const fixedDomain = scope.domain?.trim() ?? "";
+  const domainValue = fixedDomain.length > 0 ? fixedDomain : domainDraft;
+  const isEntryCreate = fixedDomain.length > 0;
+  const trimmedTypeKey = scope.typeKey?.trim();
+  const resolvedTypeKey = trimmedTypeKey ?? DEFAULT_CODE_TABLE_TYPE_KEY;
+  const attrFields = scope.attrFields ?? codeTableEntryAttrFields(ct);
+
+  async function handleConfirm(input: CodeTableEntryFormValues) {
+    setBusy(true);
+    try {
+      if (isEntryCreate) {
+        await createCodeTableEntry(fixedDomain, {
+          type_key: resolvedTypeKey,
+          code: input.code,
+          label: input.label,
+          parent_code: scope.parentCode ?? "",
+          attrs: attrsFromFormValues(input, attrFields),
+        });
+        onOpenChange(false);
+        toast.success(ct.entryCreated);
+        await scope.onCreated?.(fixedDomain);
+        return;
+      }
+
+      const created = await createCodeTableDomain({
+        domain: domainDraft.trim(),
+        code: input.code,
+        label: input.label,
+        attrs: attrsFromFormValues(input, attrFields),
+      });
+      onOpenChange(false);
+      setDomainDraft("");
+      toast.success(ct.domainCreated);
+      await scope.onCreated?.(created.domain);
+    } catch (e) {
+      onError?.(e instanceof Error ? e : new Error(String(e)));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <CodeTableEntryCreateDialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        onOpenChange(nextOpen);
+        if (!nextOpen) setDomainDraft("");
+      }}
+      busy={busy}
+      attrFields={attrFields}
+      domainField={{
+        label: ct.domainField,
+        placeholder: ct.domainFieldPlaceholder,
+        hint: isEntryCreate ? ct.domainFieldReadonlyHint : ct.domainFieldHint,
+        value: domainValue,
+        onChange: setDomainDraft,
+        readOnly: isEntryCreate,
+      }}
+      onConfirm={handleConfirm}
+    />
   );
 }
