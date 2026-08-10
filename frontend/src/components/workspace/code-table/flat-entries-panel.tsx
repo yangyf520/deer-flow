@@ -17,22 +17,18 @@ import {
   Shell,
   ShellHeader,
 } from "@/components/component";
-import {
-  headerPairedActionButtonClass,
-  workspacePageInsetXClass,
-} from "@/components/component/styles";
+import { headerPairedActionButtonClass } from "@/components/component/styles";
 import {
   CodeTableEntryCreateDialog,
   CodeTableEntryEditDialog,
 } from "@/components/workspace/code-table/entry-dialog";
-import { KnowledgeCatalogSections } from "@/components/workspace/knowledge/catalog-sections";
 import {
   createCodeTableEntry,
   deleteCodeTableEntry,
   listCodeTableDomains,
   loadCodeTableBundle,
+  normalizeCodeTableFlatBundle,
   updateCodeTableEntry,
-  type CodeTableFlatBundle,
   type CodeTableFlatEntry,
 } from "@/core/code-table/api";
 import {
@@ -45,10 +41,21 @@ import {
   type CodeTableEntryRecord,
 } from "@/core/code-table/entry-schema";
 import { useI18n } from "@/core/i18n/hooks";
-import type { KnowledgeIndustryTag } from "@/core/knowledge/api";
-import { cn } from "@/lib/utils";
 
 const INDUSTRY_TYPE_KEY = "industry_tag";
+
+type EntryDisplayRow = {
+  key: string;
+  label: string;
+  code: string;
+  subtitle?: string;
+  searchText: string;
+  record: CodeTableEntryRecord;
+};
+
+function entryMatchesQuery(row: EntryDisplayRow, q: string): boolean {
+  return row.searchText.toLowerCase().includes(q);
+}
 
 export function FlatCodeTablePanel({
   domain,
@@ -58,7 +65,6 @@ export function FlatCodeTablePanel({
   backHref?: string;
 }) {
   const { t, locale } = useI18n();
-  const kb = t.knowledge;
   const ct = t.codeTable;
   const [typeKey, setTypeKey] = useState("");
   const [categoryLabel, setCategoryLabel] = useState("");
@@ -71,8 +77,9 @@ export function FlatCodeTablePanel({
   const [editing, setEditing] = useState<CodeTableEntryRecord | null>(null);
   const [editBusy, setEditBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
-  const [entryToDelete, setEntryToDelete] =
-    useState<KnowledgeIndustryTag | null>(null);
+  const [entryCodeToDelete, setEntryCodeToDelete] = useState<string | null>(
+    null,
+  );
 
   const entryAttrFields = useMemo(
     () => (typeKey === INDUSTRY_TYPE_KEY ? industryTagAttrFields(ct) : []),
@@ -91,7 +98,11 @@ export function FlatCodeTablePanel({
       const resolvedTypeKey = category?.type_key ?? "";
       setTypeKey(resolvedTypeKey);
       setCategoryLabel(category?.label?.trim() ?? domain);
-      const flat = bundle as CodeTableFlatBundle;
+      const flat = normalizeCodeTableFlatBundle(
+        domain,
+        bundle,
+        resolvedTypeKey,
+      );
       setEntries(
         flat.items.filter(
           (item) => !resolvedTypeKey || item.type_key === resolvedTypeKey,
@@ -108,52 +119,48 @@ export function FlatCodeTablePanel({
     void reload();
   }, [reload, locale]);
 
-  const industryTags = useMemo(
-    () =>
-      typeKey === INDUSTRY_TYPE_KEY
-        ? entries.map((entry) => flatEntryToIndustryTag(entry))
-        : [],
-    [entries, typeKey],
-  );
+  const displayRows = useMemo((): EntryDisplayRow[] => {
+    if (typeKey === INDUSTRY_TYPE_KEY) {
+      return entries.map((entry) => {
+        const tag = flatEntryToIndustryTag(entry);
+        const label = tag.label?.trim() ?? tag.id;
+        const keywords = tag.keywords ?? [];
+        const department = tag.department ?? [];
+        const subtitle = keywords.length > 0 ? keywords.join(" · ") : undefined;
+        return {
+          key: tag.id,
+          label,
+          code: tag.id,
+          subtitle,
+          searchText: [label, tag.id, ...keywords, ...department].join(" "),
+          record: industryTagToEntry(tag),
+        };
+      });
+    }
+    return entries.map((entry) => {
+      const record = flatEntryToEntry(entry);
+      return {
+        key: record.code,
+        label: record.label,
+        code: record.code,
+        searchText: `${record.label} ${record.code}`,
+        record,
+      };
+    });
+  }, [entries, typeKey]);
 
   const q = query.trim().toLowerCase();
-  const filteredTags = useMemo(() => {
-    if (!q) return industryTags;
-    return industryTags.filter((tag) => {
-      const label = (tag.label?.trim() ?? tag.id).toLowerCase();
-      const keywords = (tag.keywords ?? []).join(" ").toLowerCase();
-      const department = (tag.department ?? []).join(" ").toLowerCase();
-      return (
-        tag.id.toLowerCase().includes(q) ||
-        label.includes(q) ||
-        keywords.includes(q) ||
-        department.includes(q)
-      );
-    });
-  }, [industryTags, q]);
-
-  const simpleRows = useMemo(() => {
-    if (typeKey === INDUSTRY_TYPE_KEY) return [];
-    const rows = entries.map((entry) => flatEntryToEntry(entry));
-    if (!q) return rows;
-    return rows.filter(
-      (entry) =>
-        entry.code.toLowerCase().includes(q) ||
-        entry.label.toLowerCase().includes(q),
-    );
-  }, [entries, q, typeKey]);
+  const filteredRows = useMemo(() => {
+    if (!q) return displayRows;
+    return displayRows.filter((row) => entryMatchesQuery(row, q));
+  }, [displayRows, q]);
 
   const isEmpty = !loading && entries.length === 0;
   const countLabel =
     entries.length > 0
       ? q
-        ? kb.codeTableCountFiltered(
-            typeKey === INDUSTRY_TYPE_KEY
-              ? filteredTags.length
-              : simpleRows.length,
-            entries.length,
-          )
-        : kb.codeTableCountTotal(entries.length)
+        ? ct.countFiltered(filteredRows.length, entries.length)
+        : ct.entryCount(entries.length)
       : undefined;
 
   const headerSuffix = typeKey.length > 0 ? `${domain} · ${typeKey}` : domain;
@@ -209,7 +216,7 @@ export function FlatCodeTablePanel({
     try {
       await deleteCodeTableEntry(domain, code, typeKey);
       if (editing?.code === code) setEditing(null);
-      setEntryToDelete(null);
+      setEntryCodeToDelete(null);
       toast.success(ct.entryDeleted);
       await reload();
     } catch (e) {
@@ -245,7 +252,7 @@ export function FlatCodeTablePanel({
         {error ? <AlertError>{error}</AlertError> : null}
 
         <ItemListPanel
-          className={entries.length > 0 ? "flex-initial" : undefined}
+          title={ct.entriesListTitle}
           countLabel={countLabel}
           toolbar={
             entries.length > 0 ? (
@@ -253,7 +260,7 @@ export function FlatCodeTablePanel({
                 <ListSearchField
                   value={query}
                   onChange={setQuery}
-                  placeholder={kb.codeTableSearchPlaceholder}
+                  placeholder={ct.entriesSearchPlaceholder}
                 />
               </ListPanelToolbar>
             ) : undefined
@@ -273,60 +280,47 @@ export function FlatCodeTablePanel({
                 {ct.createEntry}
               </button>
             </PanelEmpty>
-          ) : typeKey === INDUSTRY_TYPE_KEY ? (
-            filteredTags.length === 0 ? (
-              <InlineEmpty className="p-3">
-                {kb.codeTableSearchEmpty}
-              </InlineEmpty>
-            ) : (
-              <KnowledgeCatalogSections
-                scope={{ industry_tags: filteredTags }}
-                kb={kb}
-                onEditIndustryTag={(tag) => setEditing(industryTagToEntry(tag))}
-                onDeleteIndustryTag={setEntryToDelete}
-                industryTagActionsBusy={deleteBusy || editBusy}
-              />
-            )
-          ) : simpleRows.length === 0 ? (
-            <InlineEmpty className="p-3">{kb.codeTableSearchEmpty}</InlineEmpty>
+          ) : filteredRows.length === 0 ? (
+            <InlineEmpty className="p-3">{ct.entriesSearchEmpty}</InlineEmpty>
           ) : (
-            <div className={cn(workspacePageInsetXClass, "py-1.5 pb-2")}>
-              <ul className="flex flex-col gap-2">
-                {simpleRows.map((entry) => (
-                  <li
-                    key={entry.code}
-                    className="border-border/60 bg-muted/20 rounded-lg border px-3 py-2"
-                  >
-                    <div className="flex min-w-0 items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-foreground truncate text-sm font-medium">
-                          {entry.label}
-                        </div>
-                        <div className="text-muted-foreground truncate font-mono text-xs">
-                          {entry.code}
-                        </div>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <CardAction
-                          icon={SettingsIcon}
-                          label={t.common.edit}
-                          onClick={() => setEditing(entry)}
-                          disabled={deleteBusy || editBusy}
-                        />
-                        <CardAction
-                          icon={Trash2Icon}
-                          label={t.common.delete}
-                          onClick={() =>
-                            setEntryToDelete(flatEntryToIndustryTag(entry))
-                          }
-                          disabled={deleteBusy || editBusy}
-                        />
-                      </div>
+            <ul className="divide-border divide-y">
+              {filteredRows.map((row) => (
+                <li
+                  key={row.key}
+                  className="hover:bg-muted/40 flex min-w-0 items-center gap-2 px-4 py-2 transition-colors"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-foreground truncate text-sm font-medium">
+                      {row.label}
+                      {row.code !== row.label ? (
+                        <span className="text-muted-foreground ml-2 font-mono text-xs font-normal">
+                          {row.code}
+                        </span>
+                      ) : null}
                     </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
+                    {row.subtitle ? (
+                      <div className="text-muted-foreground mt-0.5 truncate text-xs">
+                        {row.subtitle}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <CardAction
+                      icon={SettingsIcon}
+                      label={t.common.edit}
+                      onClick={() => setEditing(row.record)}
+                      disabled={deleteBusy || editBusy}
+                    />
+                    <CardAction
+                      icon={Trash2Icon}
+                      label={t.common.delete}
+                      onClick={() => setEntryCodeToDelete(row.code)}
+                      disabled={deleteBusy || editBusy}
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
           )}
         </ItemListPanel>
       </Shell>
@@ -336,7 +330,6 @@ export function FlatCodeTablePanel({
         onOpenChange={setCreateOpen}
         busy={createBusy}
         attrFields={entryAttrFields}
-        codeHint={ct.entryCodeHint}
         onConfirm={onCreateEntry}
       />
 
@@ -356,9 +349,9 @@ export function FlatCodeTablePanel({
       />
 
       <ConfirmDialog
-        open={entryToDelete != null}
+        open={entryCodeToDelete != null}
         onOpenChange={(open) => {
-          if (!open) setEntryToDelete(null);
+          if (!open) setEntryCodeToDelete(null);
         }}
         title={t.common.delete}
         description={ct.deleteEntryConfirm}
@@ -366,9 +359,9 @@ export function FlatCodeTablePanel({
         confirmPending={deleteBusy}
         confirmVariant="destructive"
         onConfirm={() => {
-          if (entryToDelete) void removeEntry(entryToDelete.id);
+          if (entryCodeToDelete) void removeEntry(entryCodeToDelete);
         }}
-        onCancel={() => setEntryToDelete(null)}
+        onCancel={() => setEntryCodeToDelete(null)}
       />
     </>
   );

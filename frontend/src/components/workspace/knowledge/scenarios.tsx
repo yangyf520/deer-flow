@@ -51,9 +51,12 @@ function ScenarioFormFields({
           label={kb.codeTableEntryCode}
           value={code}
           onChange={setCode}
-          placeholder={kb.codeTableEntryCodePlaceholder}
+          placeholder={
+            codeEditable
+              ? kb.codeTableEntryCodeHint
+              : kb.codeTableEntryCodePlaceholder
+          }
           disabled={disabled === true || !codeEditable}
-          hint={codeEditable ? kb.codeTableEntryCodeHint : undefined}
           error={codeError}
           autoCapitalize="none"
           autoCorrect="off"

@@ -43,6 +43,42 @@ export type CodeTableFlatBundle = {
   items: CodeTableFlatEntry[];
 };
 
+export function isCodeTableFlatBundle(
+  bundle: KnowledgeCodeTable | CodeTableFlatBundle,
+): bundle is CodeTableFlatBundle {
+  return Array.isArray((bundle as CodeTableFlatBundle).items);
+}
+
+/** Knowledge domain returns a structured catalog; entry panels need flat rows. */
+export function normalizeCodeTableFlatBundle(
+  domain: string,
+  bundle: KnowledgeCodeTable | CodeTableFlatBundle,
+  typeKey: string = KNOWLEDGE_DEFAULT_TYPE_KEY,
+): CodeTableFlatBundle {
+  if (isCodeTableFlatBundle(bundle)) {
+    return bundle;
+  }
+  const items: CodeTableFlatEntry[] = (bundle.industry_tags ?? []).map(
+    (tag) => ({
+      id: tag.id,
+      domain,
+      type_key: typeKey,
+      code: tag.id,
+      label: tag.label?.trim() ?? tag.id,
+      parent_code: "",
+      attrs: {
+        keywords: tag.keywords ?? [],
+        department: tag.department ?? [],
+        aliases: tag.aliases ?? [],
+        ...(tag.space_id ? { space_id: tag.space_id } : {}),
+      },
+      sort_order: 0,
+      enabled: true,
+    }),
+  );
+  return { domain, items };
+}
+
 const base = () => `${getBackendBaseURL()}/api/v1/code-table`;
 
 function withLocale(init?: RequestInit): RequestInit {

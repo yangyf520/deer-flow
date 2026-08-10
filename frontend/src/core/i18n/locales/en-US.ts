@@ -296,8 +296,8 @@ export const enUS: Translations = {
   // Scheduled tasks
   scheduledTasks: {
     pageDescription: "Manage recurring or one-off agent runs",
-    listTitle: "All tasks",
-    countTotal: (count) => (count === 1 ? "1 task" : `${count} tasks`),
+    listTitle: "Task list",
+    countTotal: (count) => `${count} entries`,
     countFiltered: (shown, total) => `${shown} / ${total}`,
     emptyList: "No scheduled tasks yet",
     filterEmpty: "No tasks match the current filters",
@@ -447,8 +447,8 @@ export const enUS: Translations = {
     title: "Agents",
     description:
       "Create and manage custom agents with specialized prompts and capabilities",
-    listTitle: "All agents",
-    countTotal: (count) => (count === 1 ? "1 agent" : `${count} agents`),
+    listTitle: "Agent list",
+    countTotal: (count) => `${count} entries`,
     countFiltered: (shown, total) => `${shown} / ${total}`,
     newAgent: "New Agent",
     emptyTitle: "No custom agents yet",
@@ -604,12 +604,11 @@ export const enUS: Translations = {
   // Chats
   chats: {
     searchChats: "Search chats",
-    listTitle: "All conversations",
+    listTitle: "Conversation list",
     pageTitle: "Chat history",
     pageDescription:
       "Primary conversations from the main chat and custom agents",
-    countTotal: (count) =>
-      count === 1 ? "1 conversation" : `${count} conversations`,
+    countTotal: (count) => `${count} entries`,
     countFiltered: (shown, total) => `${shown} / ${total}`,
     searchEmpty: "No matching conversations",
     emptyList: "No conversations yet. Start a new chat from the sidebar.",

@@ -52,8 +52,8 @@ export type ApiKeysTranslations = {
 export const apiKeysEnUS: ApiKeysTranslations = {
   title: "API keys",
   description: "Create and manage API keys for programmatic access",
-  listTitle: "All keys",
-  countTotal: (count) => (count === 1 ? "1 key" : `${count} keys`),
+  listTitle: "API key list",
+  countTotal: (count) => `${count} entries`,
   countFiltered: (shown, total) => `${shown} / ${total}`,
   searchPlaceholder: "Search keys…",
   searchEmpty: "No keys match your search.",
@@ -106,8 +106,8 @@ export const apiKeysEnUS: ApiKeysTranslations = {
 export const apiKeysZhCN: ApiKeysTranslations = {
   title: "API 密钥",
   description: "创建和管理用于程序化访问的 API 密钥",
-  listTitle: "全部密钥",
-  countTotal: (count) => `${count} 个密钥`,
+  listTitle: "密钥列表",
+  countTotal: (count) => `${count} 条`,
   countFiltered: (shown, total) => `${shown} / ${total}`,
   searchPlaceholder: "搜索密钥…",
   searchEmpty: "没有匹配的密钥。",

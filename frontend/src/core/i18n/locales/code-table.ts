@@ -2,7 +2,14 @@ export type CodeTableTranslations = {
   title: string;
   description: string;
   listTitle: string;
+  entriesListTitle: string;
   empty: string;
+  searchPlaceholder: string;
+  searchEmpty: string;
+  entriesSearchPlaceholder: string;
+  entriesSearchEmpty: string;
+  countTotal: (count: number) => string;
+  countFiltered: (shown: number, total: number) => string;
   openDomain: string;
   entryCount: (count: number) => string;
   deleteDomainConfirm: (label: string) => string;
@@ -53,8 +60,15 @@ export const codeTableEnUS: CodeTableTranslations = {
   title: "Code tables",
   description:
     "Manage shared code lists by domain for tags, categories, and lookups.",
-  listTitle: "Domains",
+  listTitle: "Code table list",
+  entriesListTitle: "Code table list",
   empty: "No code-table domains are registered yet.",
+  searchPlaceholder: "Search domains…",
+  searchEmpty: "No matching domains.",
+  entriesSearchPlaceholder: "Search entries…",
+  entriesSearchEmpty: "No matching entries.",
+  countTotal: (count) => `${count} entries`,
+  countFiltered: (shown, total) => `${shown} / ${total}`,
   openDomain: "Manage",
   entryCount: (count) => `${count} entries`,
   deleteDomainConfirm: (label) =>
@@ -69,7 +83,7 @@ export const codeTableEnUS: CodeTableTranslations = {
   domainUpdated: "Domain updated",
   domainField: "Domain",
   domainFieldHint: "Business domain id — legal, finance",
-  domainFieldPlaceholder: "legal",
+  domainFieldPlaceholder: "legal, finance",
   typeKeyField: "Type key",
   typeKeyFieldHint: "Entry type within this domain — industry_tag",
   typeKeyFieldPlaceholder: "industry_tag",
@@ -88,7 +102,7 @@ export const codeTableEnUS: CodeTableTranslations = {
   entryLabel: "Display name",
   entryCodePlaceholder: "auto-driving",
   entryLabelPlaceholder: "Smart driving",
-  entryCodeHint: "Stable English id — auto-driving, smart-driving, adas",
+  entryCodeHint: "auto-driving, smart-driving, adas",
   deleteEntryConfirm: "Delete this code-table entry? This cannot be undone.",
   entryCreated: "Entry created",
   entryUpdated: "Entry updated",
@@ -122,8 +136,15 @@ export const codeTableEnUS: CodeTableTranslations = {
 export const codeTableZhCN: CodeTableTranslations = {
   title: "码表管理",
   description: "按业务域维护共用码表，供标签、分类与下拉选项使用",
-  listTitle: "业务域",
+  listTitle: "码表列表",
+  entriesListTitle: "码表列表",
   empty: "暂无已注册的码表域。",
+  searchPlaceholder: "检索业务域…",
+  searchEmpty: "没有匹配的业务域。",
+  entriesSearchPlaceholder: "检索码表…",
+  entriesSearchEmpty: "没有匹配的码表项。",
+  countTotal: (count) => `${count} 条`,
+  countFiltered: (shown, total) => `${shown} / ${total}`,
   openDomain: "管理",
   entryCount: (count) => `${count} 条`,
   deleteDomainConfirm: (label) =>
@@ -136,7 +157,7 @@ export const codeTableZhCN: CodeTableTranslations = {
   domainUpdated: "分类已更新",
   domainField: "业务域",
   domainFieldHint: "英文业务域标识：legal、finance",
-  domainFieldPlaceholder: "legal",
+  domainFieldPlaceholder: "legal、finance",
   typeKeyField: "类型键",
   typeKeyFieldHint: "该域下码表条目的 type_key：industry_tag",
   typeKeyFieldPlaceholder: "industry_tag",
@@ -154,7 +175,7 @@ export const codeTableZhCN: CodeTableTranslations = {
   entryLabel: "名称",
   entryCodePlaceholder: "auto-driving",
   entryLabelPlaceholder: "智能驾驶",
-  entryCodeHint: "英文稳定标识：auto-driving、smart-driving、adas",
+  entryCodeHint: "auto-driving、smart-driving、adas",
   deleteEntryConfirm: "确定删除此码表条目？此操作不可恢复。",
   entryCreated: "码表已创建",
   entryUpdated: "码表已更新",

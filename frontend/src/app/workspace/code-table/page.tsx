@@ -15,15 +15,15 @@ import {
   CardAction,
   ConfirmDialog,
   HeaderCreateButton,
+  InlineEmpty,
   ItemListPanel,
+  ListPanelToolbar,
+  ListSearchField,
   PanelEmpty,
   Shell,
   ShellHeader,
 } from "@/components/component";
-import {
-  headerPairedActionButtonClass,
-  workspacePageInsetXClass,
-} from "@/components/component/styles";
+import { headerPairedActionButtonClass } from "@/components/component/styles";
 import {
   CodeTableDomainCreateDialog,
   CodeTableDomainEditDialog,
@@ -39,7 +39,6 @@ import {
 } from "@/core/code-table/api";
 import { codeTableDomainHref } from "@/core/code-table/routes";
 import { useI18n } from "@/core/i18n/hooks";
-import { cn } from "@/lib/utils";
 
 const DEFAULT_DOMAINS: CodeTableDomainSummary[] = [
   {
@@ -73,6 +72,7 @@ export default function CodeTablePage() {
     useState<CodeTableDomainSummary | null>(null);
   const [domainToDelete, setDomainToDelete] =
     useState<CodeTableDomainSummary | null>(null);
+  const [query, setQuery] = useState("");
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -106,7 +106,26 @@ export default function CodeTablePage() {
     [items],
   );
 
+  const q = query.trim().toLowerCase();
+  const filteredRows = useMemo(() => {
+    if (!q) return rows;
+    return rows.filter(({ domain, type_key, label }) => {
+      const displayLabel = label?.trim().toLowerCase() ?? "";
+      return (
+        domain.toLowerCase().includes(q) ||
+        type_key.toLowerCase().includes(q) ||
+        displayLabel.includes(q)
+      );
+    });
+  }, [q, rows]);
+
   const isEmpty = !loading && rows.length === 0;
+
+  const countLabel = useMemo(() => {
+    if (rows.length === 0) return undefined;
+    if (q) return ct.countFiltered(filteredRows.length, rows.length);
+    return ct.countTotal(rows.length);
+  }, [ct, filteredRows.length, q, rows.length]);
 
   async function onCreateDomain(input: {
     domain: string;
@@ -194,8 +213,18 @@ export default function CodeTablePage() {
 
         <ItemListPanel
           title={ct.listTitle}
-          countLabel={String(rows.length)}
-          className="flex-initial"
+          countLabel={countLabel}
+          toolbar={
+            rows.length > 0 ? (
+              <ListPanelToolbar>
+                <ListSearchField
+                  value={query}
+                  onChange={setQuery}
+                  placeholder={ct.searchPlaceholder}
+                />
+              </ListPanelToolbar>
+            ) : undefined
+          }
         >
           {loading ? (
             <PanelEmpty className="py-6">{t.common.loading}</PanelEmpty>
@@ -210,55 +239,58 @@ export default function CodeTablePage() {
                 {ct.createDomain}
               </button>
             </PanelEmpty>
+          ) : filteredRows.length === 0 ? (
+            <InlineEmpty className="p-3">{ct.searchEmpty}</InlineEmpty>
           ) : (
-            <div className={cn(workspacePageInsetXClass, "py-1.5")}>
-              <ul className="flex flex-col gap-0.5">
-                {rows.map(({ domain, type_key, entry_count, href, Icon }) => (
-                  <li key={domainRowKey({ domain, type_key, entry_count })}>
-                    <div className="hover:bg-muted/40 flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 transition-colors">
-                      <Link
-                        href={href}
-                        className="flex min-w-0 flex-1 items-center gap-2"
-                      >
-                        <Icon className="text-muted-foreground size-3.5 shrink-0" />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-foreground truncate font-mono text-sm leading-snug font-medium">
-                            {domain}
-                          </div>
-                          <div className="text-muted-foreground truncate font-mono text-xs">
-                            {type_key}
-                          </div>
+            <ul className="divide-border divide-y">
+              {filteredRows.map(
+                ({ domain, type_key, entry_count, href, Icon }) => (
+                  <li
+                    key={domainRowKey({ domain, type_key, entry_count })}
+                    className="hover:bg-muted/40 flex min-w-0 items-center gap-2 px-4 py-2 transition-colors"
+                  >
+                    <Link
+                      href={href}
+                      className="flex min-w-0 flex-1 items-center gap-2"
+                    >
+                      <Icon className="text-muted-foreground size-3.5 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-foreground truncate font-mono text-sm leading-snug font-medium">
+                          {domain}
                         </div>
-                        <span className="text-muted-foreground shrink-0 text-xs">
-                          {ct.entryCount(entry_count)}
-                        </span>
-                      </Link>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <CardAction
-                          icon={SettingsIcon}
-                          label={t.common.edit}
-                          onClick={() => {
-                            setDomainToEdit({ domain, type_key, entry_count });
-                            setEditOpen(true);
-                          }}
-                          disabled={deleteBusy}
-                        />
-                        <CardAction
-                          icon={Trash2Icon}
-                          label={t.common.delete}
-                          onClick={() =>
-                            setDomainToDelete({ domain, type_key, entry_count })
-                          }
-                          disabled={
-                            deleteBusy || domain === KNOWLEDGE_CODE_TABLE_DOMAIN
-                          }
-                        />
+                        <div className="text-muted-foreground truncate font-mono text-xs">
+                          {type_key}
+                        </div>
                       </div>
+                      <span className="text-muted-foreground shrink-0 text-xs">
+                        {ct.entryCount(entry_count)}
+                      </span>
+                    </Link>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <CardAction
+                        icon={SettingsIcon}
+                        label={t.common.edit}
+                        onClick={() => {
+                          setDomainToEdit({ domain, type_key, entry_count });
+                          setEditOpen(true);
+                        }}
+                        disabled={deleteBusy}
+                      />
+                      <CardAction
+                        icon={Trash2Icon}
+                        label={t.common.delete}
+                        onClick={() =>
+                          setDomainToDelete({ domain, type_key, entry_count })
+                        }
+                        disabled={
+                          deleteBusy || domain === KNOWLEDGE_CODE_TABLE_DOMAIN
+                        }
+                      />
                     </div>
                   </li>
-                ))}
-              </ul>
-            </div>
+                ),
+              )}
+            </ul>
           )}
         </ItemListPanel>
       </Shell>

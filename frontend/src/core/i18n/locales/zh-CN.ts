@@ -282,8 +282,8 @@ export const zhCN: Translations = {
   // 定时任务
   scheduledTasks: {
     pageDescription: "管理重复或单次执行的 Agent 任务",
-    listTitle: "全部任务",
-    countTotal: (count) => `${count} 个定时任务`,
+    listTitle: "任务列表",
+    countTotal: (count) => `${count} 条`,
     countFiltered: (shown, total) => `${shown} / ${total}`,
     emptyList: "暂无定时任务",
     filterEmpty: "没有符合筛选条件的任务",
@@ -431,8 +431,8 @@ export const zhCN: Translations = {
   agents: {
     title: "智能体",
     description: "创建和管理具有专属 Prompt 与能力的自定义智能体",
-    listTitle: "全部智能体",
-    countTotal: (count) => `${count} 个智能体`,
+    listTitle: "智能体列表",
+    countTotal: (count) => `${count} 条`,
     countFiltered: (shown, total) => `${shown} / ${total}`,
     newAgent: "新建智能体",
     emptyTitle: "还没有自定义智能体",
@@ -577,10 +577,10 @@ export const zhCN: Translations = {
   // Chats
   chats: {
     searchChats: "搜索对话",
-    listTitle: "全部对话",
+    listTitle: "对话列表",
     pageTitle: "历史对话",
     pageDescription: "主智能体与自定义智能体的全部主会话",
-    countTotal: (count) => (count === 1 ? "1 个对话" : `${count} 个对话`),
+    countTotal: (count) => `${count} 条`,
     countFiltered: (shown, total) => `${shown} / ${total}`,
     searchEmpty: "没有匹配的对话",
     emptyList: "还没有对话，点击侧栏「新对话」开始",

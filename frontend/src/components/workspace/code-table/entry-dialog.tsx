@@ -63,7 +63,6 @@ function CodeTableEntryFormFields({
   attrTexts,
   setAttrText,
   codeEditable,
-  codeHint,
   disabled,
   autoFocusLabel,
 }: {
@@ -76,10 +75,13 @@ function CodeTableEntryFormFields({
   attrTexts: Record<string, string>;
   setAttrText: (key: string, value: string) => void;
   codeEditable: boolean;
-  codeHint?: string;
   disabled?: boolean;
   autoFocusLabel?: boolean;
 }) {
+  const codePlaceholder = codeEditable
+    ? (copy.entryCodeHint ?? copy.entryCodePlaceholder)
+    : copy.entryCodePlaceholder;
+
   return (
     <>
       <DialogFormSection title={copy.sectionBasic}>
@@ -88,9 +90,8 @@ function CodeTableEntryFormFields({
             label={copy.entryCode}
             value={code}
             onChange={setCode}
-            placeholder={copy.entryCodePlaceholder}
+            placeholder={codePlaceholder}
             disabled={disabled === true || !codeEditable}
-            hint={codeEditable ? codeHint : undefined}
             autoCapitalize="none"
             autoCorrect="off"
             autoComplete="off"
@@ -116,8 +117,11 @@ function CodeTableEntryFormFields({
                 label={field.label}
                 value={attrTexts[field.attrKey] ?? ""}
                 onChange={(value) => setAttrText(field.attrKey, value)}
-                placeholder={field.placeholder}
-                hint={field.hint}
+                placeholder={
+                  field.hint && field.placeholder
+                    ? `${field.hint}\n${field.placeholder}`
+                    : (field.hint ?? field.placeholder)
+                }
                 disabled={disabled}
                 rows={field.rows ?? 2}
               />
@@ -152,7 +156,6 @@ interface CodeTableEntryCreateDialogProps {
   busy: boolean;
   title?: string;
   attrFields?: CodeTableAttrFieldSpec[];
-  codeHint?: string;
   codePlaceholder?: string;
   labelPlaceholder?: string;
   onConfirm: (input: CodeTableEntryFormValues) => void | Promise<void>;
@@ -164,7 +167,6 @@ export function CodeTableEntryCreateDialog({
   busy,
   title,
   attrFields = EMPTY_ATTR_FIELDS,
-  codeHint,
   codePlaceholder,
   labelPlaceholder,
   onConfirm,
@@ -174,6 +176,7 @@ export function CodeTableEntryCreateDialog({
   const formCopy = {
     ...copy,
     entryCodePlaceholder: codePlaceholder ?? copy.entryCodePlaceholder,
+    entryCodeHint: copy.entryCodeHint,
     entryLabelPlaceholder: labelPlaceholder ?? copy.entryLabelPlaceholder,
   };
   const [code, setCode] = useState("");
@@ -216,7 +219,6 @@ export function CodeTableEntryCreateDialog({
           setAttrTexts((prev) => ({ ...prev, [key]: value }))
         }
         codeEditable
-        codeHint={codeHint}
         disabled={busy}
       />
     </FormDialog>

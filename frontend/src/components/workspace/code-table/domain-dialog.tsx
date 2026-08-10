@@ -71,7 +71,6 @@ export function CodeTableDomainCreateDialog({
             value={domain}
             onChange={setDomain}
             placeholder={ct.domainFieldPlaceholder}
-            hint={ct.domainFieldHint}
             disabled={busy}
             autoCapitalize="none"
             autoCorrect="off"
@@ -83,7 +82,6 @@ export function CodeTableDomainCreateDialog({
             value={typeKey}
             onChange={setTypeKey}
             placeholder={ct.typeKeyFieldPlaceholder}
-            hint={ct.typeKeyFieldHint}
             disabled={busy}
             autoCapitalize="none"
             autoCorrect="off"
