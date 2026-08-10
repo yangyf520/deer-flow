@@ -371,7 +371,7 @@ export function ItemCard({
         </div>
       </div>
       {hasMetaTags ? (
-        <div className="mt-auto flex flex-col gap-2 pt-2">
+        <div className="mt-1.5">
           <ul
             className={cn(
               "flex",
@@ -410,19 +410,19 @@ export function ItemCard({
     <article
       className={cn(
         panelInteractiveClass,
-        "group/card flex min-h-[8.5rem] w-full flex-col",
+        "group/card flex w-full flex-col",
         className,
       )}
     >
       {href ? (
         <Link
           href={href}
-          className="focus-visible:ring-ring hover:bg-muted/25 flex min-h-0 flex-1 flex-col rounded-[inherit] px-3.5 py-3.5 transition-colors outline-none focus-visible:ring-[3px]"
+          className="focus-visible:ring-ring hover:bg-muted/25 flex min-h-0 flex-1 flex-col rounded-[inherit] px-3.5 py-2.5 transition-colors outline-none focus-visible:ring-[3px]"
         >
           {body}
         </Link>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col px-3.5 py-3.5">{body}</div>
+        <div className="flex min-h-0 flex-1 flex-col px-3.5 py-2.5">{body}</div>
       )}
       {actions ? (
         <div
